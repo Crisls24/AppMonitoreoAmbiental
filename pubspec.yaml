@@ -1,0 +1,44 @@
+name: invernadero
+description: "A new Flutter project."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.7.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  firebase_core: ^2.31.0
+  firebase_auth: ^4.19.1
+  cloud_firestore: ^4.15.1
+  flutter_launcher_icons: ^0.14.4
+  google_sign_in: ^6.2.1
+  fl_chart: ^0.66.0
+
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/Logoapp.jpg"
+
+flutter:
+
+  uses-material-design: true
+
+  assets:
+    - assets/Splashscreen.jpg
+    - assets/logo.png
+    - assets/Invernadero.png
+    - assets/lechuga.png
+    - assets/jitomate.png
+    - assets/pepino.jpg
+

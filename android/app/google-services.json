@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "604035653454",
+    "project_id": "biosensor-55a96",
+    "storage_bucket": "biosensor-55a96.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:604035653454:android:f5e89899a6d3f10b84081f",
+        "android_client_info": {
+          "package_name": "com.example.invernadero"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "604035653454-agh80klm3opjjpulrfqe9r1iiglrb3j4.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.invernadero",
+            "certificate_hash": "a86b68f046411458ec950446179839bda40eb908"
+          }
+        },
+        {
+          "client_id": "604035653454-4af26sfhkmdc31kkip8kio81272f6bbe.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDqyjBGVcP27Zw2bf9GJ0fayzvhiYSy7rU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "604035653454-4af26sfhkmdc31kkip8kio81272f6bbe.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "604035653454-6f3bgdt87ess6k7rdd57hliemi2gqqlv.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.invernadero"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
