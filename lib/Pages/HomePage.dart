@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:firebase_database/firebase_database.dart';
+import 'dart:math';
+import 'dart:async';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -30,9 +33,9 @@ class HomePage extends StatelessWidget {
               const _MiInvernadero(),
               const _CultivosCarousel(),
               const SizedBox(height: 14),
-              const Text('Actividad Reciente', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const Text('Sensores', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 4),
-              const Text('Resumen de tareas y métricas ambientales', style: TextStyle(color: Colors.grey)),
+              const Text('Visualización individual de cada sensor', style: TextStyle(color: Colors.grey)),
               const SizedBox(height: 10),
               Container(
                 decoration: BoxDecoration(
@@ -45,9 +48,9 @@ class HomePage extends StatelessWidget {
                   labelColor: Color(0xFF388E3C),
                   unselectedLabelColor: Colors.grey,
                   tabs: [
-                    Tab(text: 'Días'),
-                    Tab(text: 'Semanas'),
-                    Tab(text: 'Meses'),
+                    Tab(text: 'Temperatura'),
+                    Tab(text: 'Humedad'),
+                    Tab(text: 'Luz'),
                   ],
                 ),
               ),
@@ -55,27 +58,15 @@ class HomePage extends StatelessWidget {
                 height: 350,
                 child: TabBarView(
                   children: [
-                    ActivityGraphAmbiental(
-                      title: 'Control Ambiental por Días',
-                      temperatura: [28, 30, 29, 32, 31, 30, 28],
-                      humedad: [40, 42, 39, 41, 44, 43, 41],
-                      luz: [70, 72, 74, 71, 73, 75, 74],
-                    ),
-                    ActivityGraphAmbiental(
-                      title: 'Control Ambiental por Semanas',
-                      temperatura: [29, 31, 30, 32, 33],
-                      humedad: [41, 43, 42, 45, 44],
-                      luz: [72, 74, 73, 75, 76],
-                    ),
-                    ActivityGraphAmbiental(
-                      title: 'Control Ambiental por Meses',
-                      temperatura: [30, 31, 32, 33, 34, 32],
-                      humedad: [43, 44, 45, 46, 45, 44],
-                      luz: [75, 76, 77, 78, 79, 77],
-                    ),
+                    // Aquí se eliminó el 'const' antes de cada gráfica
+                    TemperaturaChart(),
+                    HumedadChart(),
+                    LuzChart(),
                   ],
                 ),
               ),
+              const SizedBox(height: 20),
+              const ActivityGraphAmbiental(title: 'Gráfica Ambiental del Invernadero'),
             ],
           ),
         ),
@@ -224,53 +215,6 @@ class CropCard extends StatelessWidget {
   }
 }
 
-class ActivityGraphDia extends StatelessWidget {
-  const ActivityGraphDia();
-
-  @override
-  Widget build(BuildContext context) {
-    return const ActivityGraphCustom(
-      title: 'Temperatura Ambiental',
-      line1: [28, 30, 32, 33, 31, 29, 28],
-      line2: [],
-      line3: [],
-      color1: Colors.red,
-    );
-  }
-}
-
-
-class ActivityGraphSemana extends StatelessWidget {
-  const ActivityGraphSemana();
-
-  @override
-  Widget build(BuildContext context) {
-    return const ActivityGraphCustom(
-      title: 'Humedad del Suelo',
-      line1: [42, 45, 43, 40, 41],
-      line2: [],
-      line3: [],
-      color1: Colors.blue,
-    );
-  }
-}
-
-
-class ActivityGraphMes extends StatelessWidget {
-  const ActivityGraphMes();
-
-  @override
-  Widget build(BuildContext context) {
-    return const ActivityGraphCustom(
-      title: 'Luminosidad',
-      line1: [70, 72, 75, 74, 71, 69],
-      line2: [],
-      line3: [],
-      color1: Colors.amber,
-    );
-  }
-}
-
 
 class ActivityGraphCustom extends StatelessWidget {
   final String title;
@@ -376,60 +320,594 @@ class LegendDot extends StatelessWidget {
   }
 }
 
-class ActivityGraphTemp extends StatelessWidget {
+class TemperaturaChart extends StatefulWidget {
+  const TemperaturaChart({super.key});
+
+  @override
+  State<TemperaturaChart> createState() => _TemperaturaChartState();
+}
+
+class _TemperaturaChartState extends State<TemperaturaChart> {
+  late List<FlSpot> _spots;
+  late StreamSubscription<DatabaseEvent> _sensorStream;
+  final int _maxPoints = 7;
+  double _minTemp = 20.0;
+  double _maxTemp = 35.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _spots = [];
+    _setupSensorStream();
+  }
+
+  void _setupSensorStream() {
+    final ref = FirebaseDatabase.instance.ref('sensores/data');
+    _sensorStream = ref.onValue.listen((event) {
+      final data = event.snapshot.value as Map<dynamic, dynamic>?;
+      if (data != null && data['temperatura'] != null) {
+        // Parsear el valor de la temperatura que viene como String
+        double newTemp = double.tryParse(data['temperatura'].toString()) ?? 0.0;
+
+        setState(() {
+          // Mantener un máximo de 7 puntos
+          if (_spots.length >= _maxPoints) {
+            _spots.removeAt(0);
+          }
+          // Reajustar los índices X
+          for (int i = 0; i < _spots.length; i++) {
+            _spots[i] = FlSpot(i.toDouble(), _spots[i].y);
+          }
+          _spots.add(FlSpot(_spots.length.toDouble(), newTemp));
+
+          // Ajustar los límites de la gráfica dinámicamente
+          final allYValues = _spots.map((spot) => spot.y).toList();
+          if (allYValues.isNotEmpty) {
+            _minTemp = (allYValues.reduce((a, b) => a < b ? a : b) - 2).clamp(0, 50);
+            _maxTemp = (allYValues.reduce((a, b) => a > b ? a : b) + 2).clamp(20, 50);
+          }
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _sensorStream.cancel(); // Cancelar la suscripción al cerrar el widget
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return const ActivityGraphCustom(
-      title: 'Temperatura Ambiental',
-      line1: [28, 30, 32, 33, 31, 29, 28], // Temperatura
-      line2: [], // No se usa aquí
-      line3: [],
-      color1: Colors.red,
+    // Aquí el LineChart se mantiene con los mismos estilos, pero ahora usa _spots
+    // que se actualizan desde Firebase
+    return Card(
+      elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: LineChart(
+          LineChartData(
+            minY: _minTemp,
+            maxY: _maxTemp,
+            gridData: FlGridData(
+              show: true,
+              drawVerticalLine: false,
+              horizontalInterval: 2,
+              getDrawingHorizontalLine: (value) {
+                return FlLine(
+                  color: Colors.grey.withOpacity(0.3),
+                  strokeWidth: 0.8,
+                );
+              },
+            ),
+            titlesData: FlTitlesData(
+              show: true,
+              leftTitles: AxisTitles(
+                sideTitles: SideTitles(
+                  showTitles: true,
+                  reservedSize: 40,
+                  interval: 2,
+                  getTitlesWidget: (value, _) => Text(
+                    '${value.toInt()}°C',
+                    style: TextStyle(
+                      color: Colors.grey[700],
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+              bottomTitles: AxisTitles(
+                sideTitles: SideTitles(
+                  showTitles: true,
+                  reservedSize: 22,
+                  interval: 1,
+                  getTitlesWidget: (value, _) {
+                    final index = value.toInt();
+                    if (index >= 0 && index < _spots.length) {
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 8.0),
+                        child: Text(
+                          '${_spots.length - 1 - index}s',
+                          style: TextStyle(
+                            color: Colors.grey[700],
+                            fontSize: 10,
+                          ),
+                        ),
+                      );
+                    }
+                    return const Text('');
+                  },
+                ),
+              ),
+              rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            ),
+            borderData: FlBorderData(
+              show: true,
+              border: Border.all(
+                color: Colors.grey.withOpacity(0.5),
+                width: 1,
+              ),
+            ),
+            lineTouchData: LineTouchData(
+              enabled: true,
+              touchTooltipData: LineTouchTooltipData(
+                tooltipBgColor: Colors.black87,
+                tooltipRoundedRadius: 8,
+                getTooltipItems: (spots) {
+                  return spots.map((spot) {
+                    return LineTooltipItem(
+                      '${spot.y}°C',
+                      const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    );
+                  }).toList();
+                },
+              ),
+            ),
+            lineBarsData: [
+              LineChartBarData(
+                isCurved: true,
+                spots: _spots,
+                color: Colors.redAccent,
+                barWidth: 3.5,
+                dotData: FlDotData(
+                  show: true,
+                  getDotPainter: (spot, percent, bar, index) => FlDotCirclePainter(
+                    radius: 4,
+                    color: Colors.redAccent.withOpacity(0.9),
+                    strokeWidth: 1.5,
+                    strokeColor: Colors.white,
+                  ),
+                ),
+                belowBarData: BarAreaData(
+                  show: true,
+                  gradient: LinearGradient(
+                    colors: [
+                      Colors.redAccent.withOpacity(0.4),
+                      Colors.redAccent.withOpacity(0.0),
+                    ],
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
 
-class ActivityGraphHumedad extends StatelessWidget {
+class HumedadChart extends StatefulWidget {
+  const HumedadChart({super.key});
+
+  @override
+  State<HumedadChart> createState() => _HumedadChartState();
+}
+
+class _HumedadChartState extends State<HumedadChart> {
+  late List<FlSpot> _spots;
+  late StreamSubscription<DatabaseEvent> _sensorStream;
+  final int _maxPoints = 7;
+  double _minHum = 55.0;
+  double _maxHum = 70.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _spots = [];
+    _setupSensorStream();
+  }
+
+  void _setupSensorStream() {
+    final ref = FirebaseDatabase.instance.ref('sensores/data');
+    _sensorStream = ref.onValue.listen((event) {
+      final data = event.snapshot.value as Map<dynamic, dynamic>?;
+      if (data != null && data['humedad'] != null) {
+        double newHum = double.tryParse(data['humedad'].toString()) ?? 0.0;
+
+        setState(() {
+          if (_spots.length >= _maxPoints) {
+            _spots.removeAt(0);
+          }
+          for (int i = 0; i < _spots.length; i++) {
+            _spots[i] = FlSpot(i.toDouble(), _spots[i].y);
+          }
+          _spots.add(FlSpot(_spots.length.toDouble(), newHum));
+
+          final allYValues = _spots.map((spot) => spot.y).toList();
+          if (allYValues.isNotEmpty) {
+            _minHum = (allYValues.reduce((a, b) => a < b ? a : b) - 2).clamp(0, 100);
+            _maxHum = (allYValues.reduce((a, b) => a > b ? a : b) + 2).clamp(0, 100);
+          }
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _sensorStream.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return const ActivityGraphCustom(
-      title: 'Humedad del Suelo',
-      line1: [42, 45, 43, 40, 41, 39, 38],
-      line2: [],
-      line3: [],
-      color1: Colors.blue,
+    return Card(
+      elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: LineChart(
+          LineChartData(
+            minY: _minHum,
+            maxY: _maxHum,
+            gridData: FlGridData(
+              show: true,
+              drawVerticalLine: false,
+              horizontalInterval: 2,
+              getDrawingHorizontalLine: (value) {
+                return FlLine(
+                  color: Colors.grey.withOpacity(0.3),
+                  strokeWidth: 0.8,
+                );
+              },
+            ),
+            titlesData: FlTitlesData(
+              show: true,
+              leftTitles: AxisTitles(
+                sideTitles: SideTitles(
+                  showTitles: true,
+                  reservedSize: 40,
+                  interval: 2,
+                  getTitlesWidget: (value, _) => Text(
+                    '${value.toInt()}%',
+                    style: TextStyle(
+                      color: Colors.grey[700],
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+              bottomTitles: AxisTitles(
+                sideTitles: SideTitles(
+                  showTitles: true,
+                  reservedSize: 22,
+                  interval: 1,
+                  getTitlesWidget: (value, _) {
+                    final index = value.toInt();
+                    if (index >= 0 && index < _spots.length) {
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 8.0),
+                        child: Text(
+                          '${_spots.length - 1 - index}s',
+                          style: TextStyle(
+                            color: Colors.grey[700],
+                            fontSize: 10,
+                          ),
+                        ),
+                      );
+                    }
+                    return const Text('');
+                  },
+                ),
+              ),
+              rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            ),
+            borderData: FlBorderData(
+              show: true,
+              border: Border.all(
+                color: Colors.grey.withOpacity(0.5),
+                width: 1,
+              ),
+            ),
+            lineTouchData: LineTouchData(
+              enabled: true,
+              touchTooltipData: LineTouchTooltipData(
+                tooltipBgColor: Colors.black87,
+                tooltipRoundedRadius: 8,
+                getTooltipItems: (spots) {
+                  return spots.map((spot) {
+                    return LineTooltipItem(
+                      '${spot.y}%',
+                      const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    );
+                  }).toList();
+                },
+              ),
+            ),
+            lineBarsData: [
+              LineChartBarData(
+                isCurved: true,
+                spots: _spots,
+                color: Colors.blueAccent,
+                barWidth: 3.5,
+                dotData: FlDotData(
+                  show: true,
+                  getDotPainter: (spot, percent, bar, index) => FlDotCirclePainter(
+                    radius: 4,
+                    color: Colors.blueAccent.withOpacity(0.9),
+                    strokeWidth: 1.5,
+                    strokeColor: Colors.white,
+                  ),
+                ),
+                belowBarData: BarAreaData(
+                  show: true,
+                  gradient: LinearGradient(
+                    colors: [
+                      Colors.blueAccent.withOpacity(0.4),
+                      Colors.blueAccent.withOpacity(0.0),
+                    ],
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
 
-class ActivityGraphLuz extends StatelessWidget {
+class LuzChart extends StatefulWidget {
+  const LuzChart({super.key});
+
+  @override
+  State<LuzChart> createState() => _LuzChartState();
+}
+
+class _LuzChartState extends State<LuzChart> {
+  late List<FlSpot> _spots;
+  late StreamSubscription<DatabaseEvent> _sensorStream;
+  final int _maxPoints = 7;
+  double _minLuz = 250.0;
+  double _maxLuz = 450.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _spots = [];
+    _setupSensorStream();
+  }
+
+  void _setupSensorStream() {
+    final ref = FirebaseDatabase.instance.ref('sensores/data');
+    _sensorStream = ref.onValue.listen((event) {
+      final data = event.snapshot.value as Map<dynamic, dynamic>?;
+      if (data != null && data['luz'] != null) {
+        double newLuz = double.tryParse(data['luz'].toString()) ?? 0.0;
+
+        setState(() {
+          if (_spots.length >= _maxPoints) {
+            _spots.removeAt(0);
+          }
+          for (int i = 0; i < _spots.length; i++) {
+            _spots[i] = FlSpot(i.toDouble(), _spots[i].y);
+          }
+          _spots.add(FlSpot(_spots.length.toDouble(), newLuz));
+
+          final allYValues = _spots.map((spot) => spot.y).toList();
+          if (allYValues.isNotEmpty) {
+            _minLuz = (allYValues.reduce((a, b) => a < b ? a : b) - 20).clamp(0, 1024);
+            _maxLuz = (allYValues.reduce((a, b) => a > b ? a : b) + 20).clamp(0, 1024);
+          }
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _sensorStream.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return const ActivityGraphCustom(
-      title: 'Luminosidad',
-      line1: [70, 72, 75, 74, 71, 69, 73],
-      line2: [],
-      line3: [],
-      color1: Colors.amber,
+    return Card(
+      elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: LineChart(
+          LineChartData(
+            minY: _minLuz,
+            maxY: _maxLuz,
+            gridData: FlGridData(
+              show: true,
+              drawVerticalLine: false,
+              horizontalInterval: 50,
+              getDrawingHorizontalLine: (value) {
+                return FlLine(
+                  color: Colors.grey.withOpacity(0.3),
+                  strokeWidth: 0.8,
+                );
+              },
+            ),
+            titlesData: FlTitlesData(
+              show: true,
+              leftTitles: AxisTitles(
+                sideTitles: SideTitles(
+                  showTitles: true,
+                  reservedSize: 45,
+                  interval: 50,
+                  getTitlesWidget: (value, _) => Text(
+                    '${value.toInt()} lx',
+                    style: TextStyle(
+                      color: Colors.grey[700],
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+              bottomTitles: AxisTitles(
+                sideTitles: SideTitles(
+                  showTitles: true,
+                  reservedSize: 22,
+                  interval: 1,
+                  getTitlesWidget: (value, _) {
+                    final index = value.toInt();
+                    if (index >= 0 && index < _spots.length) {
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 8.0),
+                        child: Text(
+                          '${_spots.length - 1 - index}s',
+                          style: TextStyle(
+                            color: Colors.grey[700],
+                            fontSize: 10,
+                          ),
+                        ),
+                      );
+                    }
+                    return const Text('');
+                  },
+                ),
+              ),
+              rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+              topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            ),
+            borderData: FlBorderData(
+              show: true,
+              border: Border.all(
+                color: Colors.grey.withOpacity(0.5),
+                width: 1,
+              ),
+            ),
+            lineTouchData: LineTouchData(
+              enabled: true,
+              touchTooltipData: LineTouchTooltipData(
+                tooltipBgColor: Colors.black87,
+                tooltipRoundedRadius: 8,
+                getTooltipItems: (spots) {
+                  return spots.map((spot) {
+                    return LineTooltipItem(
+                      '${spot.y} lx',
+                      const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    );
+                  }).toList();
+                },
+              ),
+            ),
+            lineBarsData: [
+              LineChartBarData(
+                isCurved: true,
+                spots: _spots,
+                color: Colors.orangeAccent,
+                barWidth: 3.5,
+                dotData: FlDotData(
+                  show: true,
+                  getDotPainter: (spot, percent, bar, index) => FlDotCirclePainter(
+                    radius: 4,
+                    color: Colors.orangeAccent.withOpacity(0.9),
+                    strokeWidth: 1.5,
+                    strokeColor: Colors.white,
+                  ),
+                ),
+                belowBarData: BarAreaData(
+                  show: true,
+                  gradient: LinearGradient(
+                    colors: [
+                      Colors.orangeAccent.withOpacity(0.4),
+                      Colors.orangeAccent.withOpacity(0.0),
+                    ],
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
-class ActivityGraphAmbiental extends StatelessWidget {
+
+class ActivityGraphAmbiental extends StatefulWidget {
   final String title;
-  final List<double> temperatura;
-  final List<double> humedad;
-  final List<double> luz;
+  const ActivityGraphAmbiental({required this.title, super.key});
 
-  const ActivityGraphAmbiental({
-    required this.title,
-    required this.temperatura,
-    required this.humedad,
-    required this.luz,
-  });
+  @override
+  State<ActivityGraphAmbiental> createState() => _ActivityGraphAmbientalState();
+}
+
+class _ActivityGraphAmbientalState extends State<ActivityGraphAmbiental> {
+  late List<double> temperatura;
+  late List<double> humedad;
+  late List<double> luz;
+  late StreamSubscription<DatabaseEvent> _sensorStream;
+  final int _maxPoints = 7;
+
+  @override
+  void initState() {
+    super.initState();
+    temperatura = [];
+    humedad = [];
+    luz = [];
+    _setupSensorStream();
+  }
+
+  void _setupSensorStream() {
+    final ref = FirebaseDatabase.instance.ref('sensores/data');
+    _sensorStream = ref.onValue.listen((event) {
+      final data = event.snapshot.value as Map<dynamic, dynamic>?;
+      if (data != null && data['temperatura'] != null && data['humedad'] != null && data['luz'] != null) {
+        double newTemp = double.tryParse(data['temperatura'].toString()) ?? 0.0;
+        double newHum = double.tryParse(data['humedad'].toString()) ?? 0.0;
+        double newLuz = double.tryParse(data['luz'].toString()) ?? 0.0;
+
+        setState(() {
+          if (temperatura.length >= _maxPoints) temperatura.removeAt(0);
+          if (humedad.length >= _maxPoints) humedad.removeAt(0);
+          if (luz.length >= _maxPoints) luz.removeAt(0);
+
+          temperatura.add(newTemp);
+          humedad.add(newHum);
+          luz.add(newLuz);
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _sensorStream.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final maxY = [...temperatura, ...humedad, ...luz].reduce((a, b) => a > b ? a : b) + 5;
+    final allValues = [...temperatura, ...humedad, ...luz];
+    final double currentMaxY = allValues.isNotEmpty ? allValues.reduce((a, b) => a > b ? a : b) : 100;
+    final double maxY = (currentMaxY + (currentMaxY * 0.1)).clamp(50.0, 500.0);
 
     return Card(
       elevation: 3,
@@ -438,47 +916,83 @@ class ActivityGraphAmbiental extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            Text(widget.title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
             const SizedBox(height: 12),
             SizedBox(
               height: 200,
               child: LineChart(
                 LineChartData(
-                  gridData: FlGridData(show: true),
+                  gridData: FlGridData(
+                    show: true,
+                    drawVerticalLine: false,
+                    getDrawingHorizontalLine: (value) {
+                      return FlLine(
+                        color: Colors.grey.withOpacity(0.3),
+                        strokeWidth: 0.8,
+                      );
+                    },
+                  ),
                   titlesData: FlTitlesData(
-                    leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: true)),
+                    show: true,
+                    leftTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 40,
+                        getTitlesWidget: (value, _) => Text(
+                          value.toInt().toString(),
+                          style: TextStyle(
+                            color: Colors.grey[700],
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
                     bottomTitles: AxisTitles(
                       sideTitles: SideTitles(
                         showTitles: true,
-                        getTitlesWidget: (value, _) =>
-                            Text('${value.toInt()}d', style: const TextStyle(fontSize: 10)),
+                        reservedSize: 22,
+                        interval: 1,
+                        getTitlesWidget: (value, _) {
+                          final index = value.toInt();
+                          if (index >= 0 && index < _maxPoints) {
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 8.0),
+                              child: Text('${_maxPoints - 1 - index}s', style: TextStyle(color: Colors.grey[700], fontSize: 10)),
+                            );
+                          }
+                          return const Text('');
+                        },
                       ),
                     ),
+                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                   ),
                   lineTouchData: LineTouchData(
                     enabled: true,
                     touchTooltipData: LineTouchTooltipData(
-                      tooltipBgColor: Colors.white,
+                      tooltipBgColor: Colors.black87,
                       tooltipRoundedRadius: 8,
-                      getTooltipItems: (touchedSpots) {
-                        return touchedSpots.map((spot) {
-                          final label = spot.bar.gradient?.colors.first == Colors.red
-                              ? 'Temp'
-                              : spot.bar.gradient?.colors.first == Colors.blue
-                              ? 'Humedad'
-                              : 'Luz';
-                          return LineTooltipItem(
-                            '$label: ${spot.y.toStringAsFixed(1)}',
-                            const TextStyle(color: Colors.black),
-                          );
+                      getTooltipItems: (spots) {
+                        return spots.map((spot) {
+                          final color = spot.bar.color;
+                          String label;
+                          if (color == Colors.red) {
+                            label = '🌡️ Temp';
+                          } else if (color == Colors.blue) {
+                            label = '💧 Hum';
+                          } else { // Colors.amber
+                            label = '☀️ Luz';
+                          }
+                          return LineTooltipItem('$label: ${spot.y}', const TextStyle(color: Colors.white, fontWeight: FontWeight.bold));
                         }).toList();
                       },
                     ),
                   ),
                   lineBarsData: [
-                    _buildLineBar(temperatura, Colors.red),
-                    _buildLineBar(humedad, Colors.blue),
-                    _buildLineBar(luz, Colors.amber),
+                    _linea(temperatura, Colors.red),
+                    _linea(humedad, Colors.blue),
+                    _linea(luz, Colors.amber),
                   ],
                   minY: 0,
                   maxY: maxY,
@@ -496,20 +1010,40 @@ class ActivityGraphAmbiental extends StatelessWidget {
                 LegendDot(color: Colors.amber, label: 'Luz'),
               ],
             ),
+            const SizedBox(height: 8),
+            const Text('Actualizando en tiempo real...', style: TextStyle(color: Colors.grey)),
           ],
         ),
       ),
     );
   }
 
-  LineChartBarData _buildLineBar(List<double> values, Color color) {
+  LineChartBarData _linea(List<double> valores, Color color) {
     return LineChartBarData(
       isCurved: true,
       color: color,
-      barWidth: 3,
-      dotData: FlDotData(show: true),
-      belowBarData: BarAreaData(show: true, color: color.withOpacity(0.2)),
-      spots: List.generate(values.length, (i) => FlSpot(i.toDouble(), values[i])),
+      barWidth: 3.5,
+      dotData: FlDotData(
+        show: true,
+        getDotPainter: (spot, percent, bar, index) => FlDotCirclePainter(
+          radius: 4,
+          color: color.withOpacity(0.9),
+          strokeWidth: 1.5,
+          strokeColor: Colors.white,
+        ),
+      ),
+      belowBarData: BarAreaData(
+        show: true,
+        gradient: LinearGradient(
+          colors: [
+            color.withOpacity(0.4),
+            color.withOpacity(0.0),
+          ],
+          begin: Alignment.bottomCenter,
+          end: Alignment.topCenter,
+        ),
+      ),
+      spots: List.generate(valores.length, (i) => FlSpot(i.toDouble(), valores[i])),
     );
   }
 }
@@ -519,7 +1053,7 @@ class LegendSensorDot extends StatelessWidget {
   final Color color;
   final String label;
 
-  const LegendSensorDot({required this.color, required this.label});
+  const LegendSensorDot({required this.color, required this.label, super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -532,4 +1066,5 @@ class LegendSensorDot extends StatelessWidget {
     );
   }
 }
+
 

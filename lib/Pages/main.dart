@@ -1,16 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:invernadero/firebase_options.dart'; // generado por FlutterFire
 import 'package:invernadero/Pages/CrearCuentaPage.dart';
 import 'package:invernadero/Pages/HomePage.dart';
 import 'package:invernadero/Pages/login.dart';
 import 'package:invernadero/Pages/splashscreen.dart';
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized(); // necesario para usar async
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  WidgetsBinding.instance.deferFirstFrame(); // 🔐 Detiene el primer frame
   runApp(const BioSensorApp());
 }
 
@@ -25,9 +21,8 @@ class BioSensorApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.green,
       ),
-      initialRoute: '/splash',
+      home: SplashScreen(), // Splash inicia primero
       routes: {
-        '/splash': (context) => SplashScreen(),
         '/login': (context) => InicioSesion(),
         '/registrarupage': (context) => CrearCuentaPage(),
         '/home': (context) => HomePage(),
@@ -35,3 +30,4 @@ class BioSensorApp extends StatelessWidget {
     );
   }
 }
+

@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:invernadero/firebase_options.dart';
 
 class SplashScreen extends StatefulWidget {
   @override
@@ -12,10 +14,21 @@ class _SplashScreenState extends State<SplashScreen>
   late Animation<double> _fadeIn;
   late Animation<double> _scaleUp;
 
+  bool _firebaseReady = false;
+
   @override
   void initState() {
     super.initState();
 
+    // Inicializa Firebase en segundo plano
+    Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    ).then((_) {
+      _firebaseReady = true;
+      WidgetsBinding.instance.allowFirstFrame();
+    });
+
+    // Animaciones
     _mainController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 3),
@@ -28,10 +41,18 @@ class _SplashScreenState extends State<SplashScreen>
 
     _mainController.forward();
 
+    // Espera 5 segundos para mostrar el login, y se asegura que Firebase esté listo
     Timer(const Duration(seconds: 5), () {
-      _mainController.reverse().then((_) {
-        Navigator.pushReplacementNamed(context, '/login');
-      });
+      if (_firebaseReady) {
+        _mainController.reverse().then((_) {
+          Navigator.pushReplacementNamed(context, '/login');
+        });
+      } else {
+        // Espera un poco más si Firebase no ha terminado
+        Timer(const Duration(seconds: 2), () {
+          Navigator.pushReplacementNamed(context, '/login');
+        });
+      }
     });
   }
 
@@ -178,13 +199,3 @@ class _DotsLoadingState extends State<DotsLoading>
     );
   }
 }
-
-
-
-
-
-
-
-
-
-
