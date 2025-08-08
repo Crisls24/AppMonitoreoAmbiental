@@ -331,8 +331,8 @@ class _TemperaturaChartState extends State<TemperaturaChart> {
   late List<FlSpot> _spots;
   late StreamSubscription<DatabaseEvent> _sensorStream;
   final int _maxPoints = 7;
-  double _minTemp = 20.0;
-  double _maxTemp = 35.0;
+  double _minY = 20.0;
+  double _maxY = 35.0;
 
   @override
   void initState() {
@@ -346,25 +346,25 @@ class _TemperaturaChartState extends State<TemperaturaChart> {
     _sensorStream = ref.onValue.listen((event) {
       final data = event.snapshot.value as Map<dynamic, dynamic>?;
       if (data != null && data['temperatura'] != null) {
-        // Parsear el valor de la temperatura que viene como String
         double newTemp = double.tryParse(data['temperatura'].toString()) ?? 0.0;
 
         setState(() {
-          // Mantener un máximo de 7 puntos
+          // Mantener un máximo de 7 puntos y reajustar los índices X
           if (_spots.length >= _maxPoints) {
             _spots.removeAt(0);
           }
-          // Reajustar los índices X
           for (int i = 0; i < _spots.length; i++) {
             _spots[i] = FlSpot(i.toDouble(), _spots[i].y);
           }
           _spots.add(FlSpot(_spots.length.toDouble(), newTemp));
 
-          // Ajustar los límites de la gráfica dinámicamente
+          // Ajustar los límites de la gráfica dinámicamente con un margen
           final allYValues = _spots.map((spot) => spot.y).toList();
           if (allYValues.isNotEmpty) {
-            _minTemp = (allYValues.reduce((a, b) => a < b ? a : b) - 2).clamp(0, 50);
-            _maxTemp = (allYValues.reduce((a, b) => a > b ? a : b) + 2).clamp(20, 50);
+            final double currentMin = allYValues.reduce((a, b) => a < b ? a : b);
+            final double currentMax = allYValues.reduce((a, b) => a > b ? a : b);
+            _minY = (currentMin - 2).clamp(0, 50);
+            _maxY = (currentMax + 2).clamp(20, 50);
           }
         });
       }
@@ -373,14 +373,12 @@ class _TemperaturaChartState extends State<TemperaturaChart> {
 
   @override
   void dispose() {
-    _sensorStream.cancel(); // Cancelar la suscripción al cerrar el widget
+    _sensorStream.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // Aquí el LineChart se mantiene con los mismos estilos, pero ahora usa _spots
-    // que se actualizan desde Firebase
     return Card(
       elevation: 3,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -388,17 +386,14 @@ class _TemperaturaChartState extends State<TemperaturaChart> {
         padding: const EdgeInsets.all(16),
         child: LineChart(
           LineChartData(
-            minY: _minTemp,
-            maxY: _maxTemp,
+            minY: _minY,
+            maxY: _maxY,
             gridData: FlGridData(
               show: true,
               drawVerticalLine: false,
               horizontalInterval: 2,
               getDrawingHorizontalLine: (value) {
-                return FlLine(
-                  color: Colors.grey.withOpacity(0.3),
-                  strokeWidth: 0.8,
-                );
+                return FlLine(color: Colors.grey.withOpacity(0.3), strokeWidth: 0.8);
               },
             ),
             titlesData: FlTitlesData(
@@ -410,11 +405,7 @@ class _TemperaturaChartState extends State<TemperaturaChart> {
                   interval: 2,
                   getTitlesWidget: (value, _) => Text(
                     '${value.toInt()}°C',
-                    style: TextStyle(
-                      color: Colors.grey[700],
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(color: Colors.grey[700], fontSize: 11, fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
@@ -428,13 +419,7 @@ class _TemperaturaChartState extends State<TemperaturaChart> {
                     if (index >= 0 && index < _spots.length) {
                       return Padding(
                         padding: const EdgeInsets.only(top: 8.0),
-                        child: Text(
-                          '${_spots.length - 1 - index}s',
-                          style: TextStyle(
-                            color: Colors.grey[700],
-                            fontSize: 10,
-                          ),
-                        ),
+                        child: Text('${_spots.length - 1 - index}s', style: TextStyle(color: Colors.grey[700], fontSize: 10)),
                       );
                     }
                     return const Text('');
@@ -446,10 +431,7 @@ class _TemperaturaChartState extends State<TemperaturaChart> {
             ),
             borderData: FlBorderData(
               show: true,
-              border: Border.all(
-                color: Colors.grey.withOpacity(0.5),
-                width: 1,
-              ),
+              border: Border.all(color: Colors.grey.withOpacity(0.5), width: 1),
             ),
             lineTouchData: LineTouchData(
               enabled: true,
@@ -459,7 +441,7 @@ class _TemperaturaChartState extends State<TemperaturaChart> {
                 getTooltipItems: (spots) {
                   return spots.map((spot) {
                     return LineTooltipItem(
-                      '${spot.y}°C',
+                      '${spot.y.toStringAsFixed(1)}°C',
                       const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                     );
                   }).toList();
@@ -512,8 +494,8 @@ class _HumedadChartState extends State<HumedadChart> {
   late List<FlSpot> _spots;
   late StreamSubscription<DatabaseEvent> _sensorStream;
   final int _maxPoints = 7;
-  double _minHum = 55.0;
-  double _maxHum = 70.0;
+  double _minY = 55.0;
+  double _maxY = 70.0;
 
   @override
   void initState() {
@@ -540,8 +522,10 @@ class _HumedadChartState extends State<HumedadChart> {
 
           final allYValues = _spots.map((spot) => spot.y).toList();
           if (allYValues.isNotEmpty) {
-            _minHum = (allYValues.reduce((a, b) => a < b ? a : b) - 2).clamp(0, 100);
-            _maxHum = (allYValues.reduce((a, b) => a > b ? a : b) + 2).clamp(0, 100);
+            final double currentMin = allYValues.reduce((a, b) => a < b ? a : b);
+            final double currentMax = allYValues.reduce((a, b) => a > b ? a : b);
+            _minY = (currentMin - 5).clamp(0, 100);
+            _maxY = (currentMax + 5).clamp(0, 100);
           }
         });
       }
@@ -563,17 +547,14 @@ class _HumedadChartState extends State<HumedadChart> {
         padding: const EdgeInsets.all(16),
         child: LineChart(
           LineChartData(
-            minY: _minHum,
-            maxY: _maxHum,
+            minY: _minY,
+            maxY: _maxY,
             gridData: FlGridData(
               show: true,
               drawVerticalLine: false,
-              horizontalInterval: 2,
+              horizontalInterval: 5, // Ajustado para humedad
               getDrawingHorizontalLine: (value) {
-                return FlLine(
-                  color: Colors.grey.withOpacity(0.3),
-                  strokeWidth: 0.8,
-                );
+                return FlLine(color: Colors.grey.withOpacity(0.3), strokeWidth: 0.8);
               },
             ),
             titlesData: FlTitlesData(
@@ -582,14 +563,10 @@ class _HumedadChartState extends State<HumedadChart> {
                 sideTitles: SideTitles(
                   showTitles: true,
                   reservedSize: 40,
-                  interval: 2,
+                  interval: 5,
                   getTitlesWidget: (value, _) => Text(
                     '${value.toInt()}%',
-                    style: TextStyle(
-                      color: Colors.grey[700],
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(color: Colors.grey[700], fontSize: 11, fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
@@ -603,13 +580,7 @@ class _HumedadChartState extends State<HumedadChart> {
                     if (index >= 0 && index < _spots.length) {
                       return Padding(
                         padding: const EdgeInsets.only(top: 8.0),
-                        child: Text(
-                          '${_spots.length - 1 - index}s',
-                          style: TextStyle(
-                            color: Colors.grey[700],
-                            fontSize: 10,
-                          ),
-                        ),
+                        child: Text('${_spots.length - 1 - index}s', style: TextStyle(color: Colors.grey[700], fontSize: 10)),
                       );
                     }
                     return const Text('');
@@ -621,10 +592,7 @@ class _HumedadChartState extends State<HumedadChart> {
             ),
             borderData: FlBorderData(
               show: true,
-              border: Border.all(
-                color: Colors.grey.withOpacity(0.5),
-                width: 1,
-              ),
+              border: Border.all(color: Colors.grey.withOpacity(0.5), width: 1),
             ),
             lineTouchData: LineTouchData(
               enabled: true,
@@ -634,7 +602,7 @@ class _HumedadChartState extends State<HumedadChart> {
                 getTooltipItems: (spots) {
                   return spots.map((spot) {
                     return LineTooltipItem(
-                      '${spot.y}%',
+                      '${spot.y.toStringAsFixed(1)}%',
                       const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                     );
                   }).toList();
@@ -659,10 +627,7 @@ class _HumedadChartState extends State<HumedadChart> {
                 belowBarData: BarAreaData(
                   show: true,
                   gradient: LinearGradient(
-                    colors: [
-                      Colors.blueAccent.withOpacity(0.4),
-                      Colors.blueAccent.withOpacity(0.0),
-                    ],
+                    colors: [Colors.blueAccent.withOpacity(0.4), Colors.blueAccent.withOpacity(0.0)],
                     begin: Alignment.bottomCenter,
                     end: Alignment.topCenter,
                   ),
@@ -687,8 +652,8 @@ class _LuzChartState extends State<LuzChart> {
   late List<FlSpot> _spots;
   late StreamSubscription<DatabaseEvent> _sensorStream;
   final int _maxPoints = 7;
-  double _minLuz = 250.0;
-  double _maxLuz = 450.0;
+  double _minY = 250.0;
+  double _maxY = 450.0;
 
   @override
   void initState() {
@@ -715,8 +680,10 @@ class _LuzChartState extends State<LuzChart> {
 
           final allYValues = _spots.map((spot) => spot.y).toList();
           if (allYValues.isNotEmpty) {
-            _minLuz = (allYValues.reduce((a, b) => a < b ? a : b) - 20).clamp(0, 1024);
-            _maxLuz = (allYValues.reduce((a, b) => a > b ? a : b) + 20).clamp(0, 1024);
+            final double currentMin = allYValues.reduce((a, b) => a < b ? a : b);
+            final double currentMax = allYValues.reduce((a, b) => a > b ? a : b);
+            _minY = (currentMin - 50).clamp(0, 1024); // Ajustado para luz
+            _maxY = (currentMax + 50).clamp(0, 1024); // Ajustado para luz
           }
         });
       }
@@ -738,17 +705,14 @@ class _LuzChartState extends State<LuzChart> {
         padding: const EdgeInsets.all(16),
         child: LineChart(
           LineChartData(
-            minY: _minLuz,
-            maxY: _maxLuz,
+            minY: _minY,
+            maxY: _maxY,
             gridData: FlGridData(
               show: true,
               drawVerticalLine: false,
-              horizontalInterval: 50,
+              horizontalInterval: 50, // Ajustado para luz
               getDrawingHorizontalLine: (value) {
-                return FlLine(
-                  color: Colors.grey.withOpacity(0.3),
-                  strokeWidth: 0.8,
-                );
+                return FlLine(color: Colors.grey.withOpacity(0.3), strokeWidth: 0.8);
               },
             ),
             titlesData: FlTitlesData(
@@ -760,11 +724,7 @@ class _LuzChartState extends State<LuzChart> {
                   interval: 50,
                   getTitlesWidget: (value, _) => Text(
                     '${value.toInt()} lx',
-                    style: TextStyle(
-                      color: Colors.grey[700],
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(color: Colors.grey[700], fontSize: 11, fontWeight: FontWeight.bold),
                   ),
                 ),
               ),
@@ -778,13 +738,7 @@ class _LuzChartState extends State<LuzChart> {
                     if (index >= 0 && index < _spots.length) {
                       return Padding(
                         padding: const EdgeInsets.only(top: 8.0),
-                        child: Text(
-                          '${_spots.length - 1 - index}s',
-                          style: TextStyle(
-                            color: Colors.grey[700],
-                            fontSize: 10,
-                          ),
-                        ),
+                        child: Text('${_spots.length - 1 - index}s', style: TextStyle(color: Colors.grey[700], fontSize: 10)),
                       );
                     }
                     return const Text('');
@@ -796,10 +750,7 @@ class _LuzChartState extends State<LuzChart> {
             ),
             borderData: FlBorderData(
               show: true,
-              border: Border.all(
-                color: Colors.grey.withOpacity(0.5),
-                width: 1,
-              ),
+              border: Border.all(color: Colors.grey.withOpacity(0.5), width: 1),
             ),
             lineTouchData: LineTouchData(
               enabled: true,
@@ -809,7 +760,7 @@ class _LuzChartState extends State<LuzChart> {
                 getTooltipItems: (spots) {
                   return spots.map((spot) {
                     return LineTooltipItem(
-                      '${spot.y} lx',
+                      '${spot.y.toStringAsFixed(1)} lx',
                       const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                     );
                   }).toList();
@@ -834,10 +785,7 @@ class _LuzChartState extends State<LuzChart> {
                 belowBarData: BarAreaData(
                   show: true,
                   gradient: LinearGradient(
-                    colors: [
-                      Colors.orangeAccent.withOpacity(0.4),
-                      Colors.orangeAccent.withOpacity(0.0),
-                    ],
+                    colors: [Colors.orangeAccent.withOpacity(0.4), Colors.orangeAccent.withOpacity(0.0)],
                     begin: Alignment.bottomCenter,
                     end: Alignment.topCenter,
                   ),
@@ -891,7 +839,9 @@ class _ActivityGraphAmbientalState extends State<ActivityGraphAmbiental> {
 
           temperatura.add(newTemp);
           humedad.add(newHum);
-          luz.add(newLuz);
+          // Normalizar el valor de luz para que esté en un rango similar
+          // a temperatura y humedad (0-100)
+          luz.add((newLuz / 10.24).clamp(0, 100));
         });
       }
     });
@@ -905,9 +855,10 @@ class _ActivityGraphAmbientalState extends State<ActivityGraphAmbiental> {
 
   @override
   Widget build(BuildContext context) {
+    // Calculo dinámico del eje Y
     final allValues = [...temperatura, ...humedad, ...luz];
-    final double currentMaxY = allValues.isNotEmpty ? allValues.reduce((a, b) => a > b ? a : b) : 100;
-    final double maxY = (currentMaxY + (currentMaxY * 0.1)).clamp(50.0, 500.0);
+    final double currentMaxY = allValues.isNotEmpty ? allValues.reduce((a, b) => a > b ? a : b) : 100.0;
+    final double maxY = (currentMaxY + 10).clamp(50, 120);
 
     return Card(
       elevation: 3,
@@ -926,10 +877,7 @@ class _ActivityGraphAmbientalState extends State<ActivityGraphAmbiental> {
                     show: true,
                     drawVerticalLine: false,
                     getDrawingHorizontalLine: (value) {
-                      return FlLine(
-                        color: Colors.grey.withOpacity(0.3),
-                        strokeWidth: 0.8,
-                      );
+                      return FlLine(color: Colors.grey.withOpacity(0.3), strokeWidth: 0.8);
                     },
                   ),
                   titlesData: FlTitlesData(
@@ -940,11 +888,7 @@ class _ActivityGraphAmbientalState extends State<ActivityGraphAmbiental> {
                         reservedSize: 40,
                         getTitlesWidget: (value, _) => Text(
                           value.toInt().toString(),
-                          style: TextStyle(
-                            color: Colors.grey[700],
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: TextStyle(color: Colors.grey[700], fontSize: 11, fontWeight: FontWeight.bold),
                         ),
                       ),
                     ),
@@ -978,13 +922,13 @@ class _ActivityGraphAmbientalState extends State<ActivityGraphAmbiental> {
                           final color = spot.bar.color;
                           String label;
                           if (color == Colors.red) {
-                            label = '🌡️ Temp';
+                            label = 'Temp';
                           } else if (color == Colors.blue) {
-                            label = '💧 Hum';
+                            label = 'Hum';
                           } else { // Colors.amber
-                            label = '☀️ Luz';
+                            label = 'Luz';
                           }
-                          return LineTooltipItem('$label: ${spot.y}', const TextStyle(color: Colors.white, fontWeight: FontWeight.bold));
+                          return LineTooltipItem('$label: ${spot.y.toStringAsFixed(1)}', const TextStyle(color: Colors.white, fontWeight: FontWeight.bold));
                         }).toList();
                       },
                     ),
@@ -1048,13 +992,11 @@ class _ActivityGraphAmbientalState extends State<ActivityGraphAmbiental> {
   }
 }
 
-
-class LegendSensorDot extends StatelessWidget {
+// Widget de leyenda, se mantiene igual
+class LegendDotPrub extends StatelessWidget {
   final Color color;
   final String label;
-
-  const LegendSensorDot({required this.color, required this.label, super.key});
-
+  const LegendDotPrub({required this.color, required this.label, super.key});
   @override
   Widget build(BuildContext context) {
     return Row(
