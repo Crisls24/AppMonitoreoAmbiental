@@ -147,6 +147,7 @@ class _CrearCuentaPageState extends State<CrearCuentaPage> {
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 12)],
                 ),
+
                 child: Column(
                   children: [
                     TextField(
