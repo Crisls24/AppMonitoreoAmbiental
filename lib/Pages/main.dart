@@ -6,6 +6,7 @@ import 'package:invernadero/Pages/splashscreen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+
   WidgetsBinding.instance.deferFirstFrame(); // 🔐 Detiene el primer frame
   runApp(const BioSensorApp());
 }
