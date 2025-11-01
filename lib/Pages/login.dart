@@ -1,214 +1,439 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:invernadero/Pages/SeleccionRol.dart';
+import 'package:invernadero/Pages/GestionInvernadero.dart';
+import 'package:invernadero/Pages/HomePage.dart';
 
 class InicioSesion extends StatefulWidget {
-  const InicioSesion({Key? key}) : super(key: key);
+  final String? invernaderoIdToJoin; // ID recibido desde el link de invitación
+
+  const InicioSesion({super.key, this.invernaderoIdToJoin});
 
   @override
   State<InicioSesion> createState() => _InicioSesionState();
 }
 
 class _InicioSesionState extends State<InicioSesion> {
+  // 🔑 Clave para el formulario
+  final _formKey = GlobalKey<FormState>();
+
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  bool _obscureText = true;
-  bool _loading = false;
+  final ValueNotifier<bool> _loadingNotifier = ValueNotifier(false);
+  bool _obscure = true;
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final GoogleSignIn _googleSignIn = GoogleSignIn();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  void _loginUser() async {
-    String email = _emailController.text.trim();
-    String password = _passwordController.text;
+  String? _pendingInvernadero; // ID temporal leído de SharedPreferences
 
-    if (email.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Completa todos los campos')),
-      );
-      return;
-    }
-
-    setState(() => _loading = true);
-
-    try {
-      await _auth.signInWithEmailAndPassword(email: email, password: password);
-      Navigator.pushReplacementNamed(context, '/home');
-    } on FirebaseAuthException catch (e) {
-      String errorMsg = 'Error al iniciar sesión';
-
-      if (e.code == 'user-not-found') {
-        errorMsg = 'El usuario no existe';
-      } else if (e.code == 'wrong-password') {
-        errorMsg = 'Contraseña incorrecta';
-      } else if (e.code == 'invalid-email') {
-        errorMsg = 'Correo no válido';
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(errorMsg)));
-    } finally {
-      setState(() => _loading = false);
-    }
+  @override
+  void initState() {
+    super.initState();
+    _loadPendingInvernadero();
   }
 
-  Future<void> _loginWithGoogle() async {
-    try {
-      // Cerrar sesión de Google antes de iniciar
-      await _googleSignIn.signOut();
-
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) return;
-
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
-
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-
-      await _auth.signInWithCredential(credential);
-      Navigator.pushReplacementNamed(context, '/home');
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error con Google: $e')),
-      );
-    }
-  }
-
-  Future<void> _logoutGoogle() async {
-    try {
-      await _googleSignIn.signOut();
-      await _auth.signOut();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Sesión cerrada')),
-      );
-      Navigator.pushReplacementNamed(context, '/login');
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error al cerrar sesión: $e')),
-      );
+  Future<void> _loadPendingInvernadero() async {
+    final prefs = await SharedPreferences.getInstance();
+    // NOTA: El main.dart usa 'pendingInvernaderoId', ajustado a ese key.
+    final saved = prefs.getString('pendingInvernaderoId');
+    setState(() {
+      _pendingInvernadero = saved;
+    });
+    if (saved != null) {
+      debugPrint('📥 Cargado pendingInvernaderoId: $saved');
     }
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topRight,
-            end: Alignment.bottomLeft,
-            colors: [Color(0xFFdcedc8), Color(0xFFF8F5ED)],
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    _loadingNotifier.dispose();
+    super.dispose();
+  }
+
+  // 🔹 Iniciar sesión con email y contraseña
+  Future<void> _loginUser() async {
+    // 🛑 VALIDACIÓN CLAVE: Muestra errores de forma inmediata si los campos están vacíos.
+    if (!_formKey.currentState!.validate()) {
+      debugPrint('🛑 Validación fallida: Campos vacíos detectados.');
+      return;
+    }
+
+    _loadingNotifier.value = true;
+    try {
+      final userCredential = await _auth.signInWithEmailAndPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
+
+      final user = userCredential.user;
+      if (user != null) {
+        debugPrint('✅ Sesión iniciada localmente para ${user.email}');
+        await _navigateAfterLogin(user);
+      }
+    } on FirebaseAuthException catch (e) {
+      String errorMessage = 'Error al iniciar sesión. Verifica tu correo y contraseña.';
+      if (e.code == 'user-not-found' || e.code == 'wrong-password' || e.code == 'invalid-credential') {
+        errorMessage = 'Credenciales inválidas. Revisa tu correo y contraseña.';
+      } else if (e.code == 'user-disabled') {
+        errorMessage = 'Tu cuenta ha sido deshabilitada.';
+      } else if (e.code == 'invalid-email') {
+        errorMessage = 'El formato del correo electrónico es incorrecto.';
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(errorMessage), backgroundColor: Colors.red),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error desconocido: $e')),
+        );
+      }
+    } finally {
+      if (mounted) _loadingNotifier.value = false;
+    }
+  }
+
+  // 🔹 Iniciar sesión con Google
+  Future<void> _loginWithGoogle() async {
+    _loadingNotifier.value = true;
+    try {
+      await _googleSignIn.signOut(); // limpia sesión previa
+      final googleUser = await _googleSignIn.signIn();
+      if (googleUser == null) return;
+
+      final googleAuth = await googleUser.authentication;
+      final credential = GoogleAuthProvider.credential(
+        idToken: googleAuth.idToken,
+        accessToken: googleAuth.accessToken,
+      );
+
+      final userCredential = await _auth.signInWithCredential(credential);
+      final user = userCredential.user;
+
+      if (user != null) {
+        final prefs = await SharedPreferences.getInstance();
+        final savedInvernadero = widget.invernaderoIdToJoin ?? _pendingInvernadero;
+        final userRef = _firestore.collection('usuarios').doc(user.uid);
+        final doc = await userRef.get();
+
+        // Si es nuevo usuario, lo creamos
+        if (!doc.exists) {
+          await userRef.set({
+            'uid': user.uid,
+            'email': user.email,
+            'nombre': user.displayName,
+            // Si hay link, se une como empleado, si no, queda pendiente para SeleccionRol
+            'invernaderoId': savedInvernadero ?? '',
+            'fechaRegistro': FieldValue.serverTimestamp(),
+            'rol': savedInvernadero != null ? 'empleado' : 'pendiente',
+          });
+
+          debugPrint('🆕 Nuevo usuario creado con Google: ${user.email}');
+        }
+
+        debugPrint('✅ Sesión iniciada con Google para ${user.email}');
+        await _navigateAfterLogin(user);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error con Google: $e')),
+        );
+      }
+    } finally {
+      if (mounted) _loadingNotifier.value = false;
+    }
+  }
+
+  // 🔹 Decide a dónde redirigir después del login
+  Future<void> _navigateAfterLogin(User user) async {
+    final docRef = _firestore.collection('usuarios').doc(user.uid);
+    final doc = await docRef.get();
+    final data = doc.data() ?? {};
+
+    // Limpieza de caché de invitación pendiente al iniciar sesión
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('pendingInvernaderoId');
+
+    final String normalizedRol = (data['rol'] as String?)?.toLowerCase() ?? '';
+    final String invernaderoIdExistente =
+        (data['invernaderoId'] as String?) ??
+            (data['greenhouseId'] as String?) ??
+            '';
+
+    // Combina los posibles orígenes del ID para la navegación
+    final String? invernaderoToJoin = widget.invernaderoIdToJoin?.isNotEmpty == true
+        ? widget.invernaderoIdToJoin
+        : _pendingInvernadero;
+
+    debugPrint('🔍 LOGIN_NAV → rol=$normalizedRol, invernaderoExistente=$invernaderoIdExistente');
+    debugPrint('🔗 LOGIN_NAV → invernaderoToJoin=$invernaderoToJoin');
+
+    // 🔸 Si vino desde link de invitación (prioridad alta)
+    if (invernaderoToJoin != null && invernaderoToJoin.isNotEmpty) {
+      debugPrint('📩 Usuario vino desde link ($invernaderoToJoin)');
+
+      // Si ya tiene el rol y es del mismo invernadero, va a Home
+      if (normalizedRol == 'empleado' && invernaderoIdExistente == invernaderoToJoin) {
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => HomePage()));
+        return;
+      }
+
+      // Si no tiene rol (o es pendiente), va a Selección de Rol para procesar la invitación
+      if (normalizedRol.isEmpty || normalizedRol == 'pendiente') {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => SeleccionRol(invernaderoIdFromLink: invernaderoToJoin),
           ),
-        ),
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'BioSensor',
-                  style: TextStyle(
-                    fontSize: 36,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF2E7D32),
-                    letterSpacing: 1.4,
-                    shadows: [Shadow(offset: Offset(0, 2), blurRadius: 4, color: Colors.black26)],
-                  ),
+        );
+        return;
+      }
+
+      // Si es dueño (siempre tiene prioridad), va a Gestión
+      if (normalizedRol == 'dueño') {
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => Gestioninvernadero()));
+        return;
+      }
+    }
+
+    // 🔹 Flujo normal (sin link)
+    if (normalizedRol.isEmpty || normalizedRol == 'pendiente') {
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const SeleccionRol()));
+      return;
+    }
+
+    if (normalizedRol == 'dueño') {
+      if (invernaderoIdExistente.isNotEmpty) {
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => Gestioninvernadero()));
+      } else {
+        Navigator.pushReplacementNamed(context, '/registrarinvernadero');
+      }
+      return;
+    }
+
+    if (normalizedRol == 'empleado') {
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => HomePage()));
+      return;
+    }
+
+    // Rol desconocido → va a selección
+    Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const SeleccionRol()));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const Color primaryGreen = Color(0xFF2E7D32);
+    const double cardMaxWidth = 450.0;
+
+    return Scaffold(
+      body: Stack(
+        children: [
+          // Fondo
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [primaryGreen, Color(0xFF66BB6A)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+          ),
+
+          // Contenido principal
+          Align(
+            alignment: Alignment.center,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: cardMaxWidth),
+                padding: const EdgeInsets.all(28),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: const [
+                    BoxShadow(color: Colors.black26, blurRadius: 12, offset: Offset(0, 6)),
+                  ],
                 ),
-                const SizedBox(height: 40),
-                Container(
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, 4))],
-                  ),
+                child: Form( // 💡 Agregado el widget Form
+                  key: _formKey, // 🔑 Asignada la clave
                   child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Text('Empecemos', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 8),
-                      const Text('Ingresa tu Cuenta.', style: TextStyle(color: Colors.grey)),
-                      const SizedBox(height: 20),
-                      TextField(
-                        controller: _emailController,
-                        decoration: InputDecoration(
-                          labelText: 'Email',
-                          filled: true,
-                          fillColor: Colors.grey[200],
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      TextField(
-                        controller: _passwordController,
-                        obscureText: _obscureText,
-                        decoration: InputDecoration(
-                          labelText: 'Contraseña',
-                          filled: true,
-                          fillColor: Colors.grey[200],
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                          suffixIcon: IconButton(
-                            icon: Icon(_obscureText ? Icons.visibility_off : Icons.visibility),
-                            onPressed: () => setState(() => _obscureText = !_obscureText),
+                      if (widget.invernaderoIdToJoin != null || _pendingInvernadero != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 20),
+                          child: Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFC8E6C9),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Row(
+                              children: [
+                                Icon(Icons.person_add_alt_1, color: primaryGreen),
+                                SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Has sido invitado a un invernadero. Inicia sesión o regístrate para unirte.',
+                                    style: TextStyle(
+                                      color: primaryGreen,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
+
+                      const Icon(Icons.eco_rounded, color: primaryGreen, size: 64),
+                      const SizedBox(height: 10),
+                      const Text(
+                        "BioSensor",
+                        style: TextStyle(fontSize: 32, fontWeight: FontWeight.w800, color: primaryGreen),
+                      ),
+                      const Text(
+                        "Control Inteligente del Invernadero",
+                        style: TextStyle(fontSize: 14, color: Colors.black54),
+                      ),
+                      const SizedBox(height: 30),
+
+                      // Email (TextFormField con validación)
+                      TextFormField( // 💡 Cambiado a TextFormField
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: InputDecoration(
+                          labelText: 'Correo electrónico',
+                          prefixIcon: const Icon(Icons.email_outlined, color: primaryGreen),
+                          focusedBorder: const OutlineInputBorder(
+                            borderSide: BorderSide(color: primaryGreen, width: 2),
+                          ),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Por favor, ingresa tu correo electrónico.'; // Mensaje de error
+                          }
+                          return null;
+                        },
                       ),
                       const SizedBox(height: 20),
-                      ElevatedButton(
-                        onPressed: _loading ? null : _loginUser,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF388E3C),
-                          minimumSize: const Size(double.infinity, 50),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+
+                      // Contraseña (TextFormField con validación)
+                      TextFormField( // 💡 Cambiado a TextFormField
+                        controller: _passwordController,
+                        obscureText: _obscure,
+                        decoration: InputDecoration(
+                          labelText: 'Contraseña',
+                          prefixIcon: const Icon(Icons.lock_outline, color: primaryGreen),
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _obscure ? Icons.visibility_off : Icons.visibility,
+                              color: Colors.grey,
+                            ),
+                            onPressed: () => setState(() => _obscure = !_obscure),
+                          ),
+                          focusedBorder: const OutlineInputBorder(
+                            borderSide: BorderSide(color: primaryGreen, width: 2),
+                          ),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                         ),
-                        child: _loading
-                            ? const CircularProgressIndicator(color: Colors.white)
-                            : const Text('Iniciar Sesión', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Por favor, ingresa tu contraseña.'; // Mensaje de error
+                          }
+                          return null;
+                        },
                       ),
-                      const SizedBox(height: 16),
-                      const Text("O iniciar sesión con."),
-                      const SizedBox(height: 12),
-                      OutlinedButton.icon(
-                        onPressed: _loginWithGoogle,
-                        icon: const Icon(Icons.g_mobiledata, size: 28),
-                        label: const Text("Google"),
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size(double.infinity, 50),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          side: const BorderSide(color: Color(0xFF2E7D32)),
-                          foregroundColor: const Color(0xFF2E7D32),
-                        ),
+                      const SizedBox(height: 30),
+
+                      // Botones
+                      ValueListenableBuilder<bool>(
+                        valueListenable: _loadingNotifier,
+                        builder: (context, isLoading, _) {
+                          return Column(
+                            children: [
+                              ElevatedButton(
+                                onPressed: isLoading ? null : _loginUser,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: primaryGreen,
+                                  foregroundColor: Colors.white,
+                                  minimumSize: const Size(double.infinity, 55),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                ),
+                                child: isLoading
+                                    ? const SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+                                )
+                                    : const Text(
+                                  'Iniciar Sesión',
+                                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              const SizedBox(height: 20),
+                              OutlinedButton.icon(
+                                onPressed: isLoading ? null : _loginWithGoogle,
+                                icon: const Icon(Icons.g_mobiledata, size: 32, color: primaryGreen),
+                                label: const Text(
+                                  'Continuar con Google',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    color: primaryGreen,
+                                  ),
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  side: const BorderSide(color: primaryGreen, width: 2),
+                                  minimumSize: const Size(double.infinity, 55),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
                       ),
-                      const SizedBox(height: 20),
+
+                      const SizedBox(height: 25),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           const Text("¿No tienes una cuenta? "),
                           GestureDetector(
-                            onTap: () => Navigator.pushNamed(context, '/registrarupage'),
-                            child: const Text("Crear cuenta.",
-                                style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2E7D32))),
+                            onTap: () {
+                              Navigator.pushNamed(
+                                context,
+                                '/registrarupage',
+                                arguments: widget.invernaderoIdToJoin ?? _pendingInvernadero,
+                              );
+                            },
+                            child: const Text(
+                              "Crear cuenta",
+                              style: TextStyle(color: primaryGreen, fontWeight: FontWeight.bold),
+                            ),
                           ),
                         ],
-                      ),
-                      const SizedBox(height: 12),
-                      // Botón para cerrar sesión por completo (opcional para pruebas)
-                      TextButton(
-                        onPressed: _logoutGoogle,
-                        child: const Text(
-                          "Cerrar sesión",
-                          style: TextStyle(color: Colors.grey),
-                        ),
                       ),
                     ],
                   ),
                 ),
-              ],
+              ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }

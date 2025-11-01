@@ -1,208 +1,351 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:invernadero/Pages/SeleccionRol.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // Importación necesaria
 
 class CrearCuentaPage extends StatefulWidget {
-  const CrearCuentaPage({Key? key}) : super(key: key);
+  final String? invernaderoIdToJoin;
+  const CrearCuentaPage({super.key, this.invernaderoIdToJoin});
 
   @override
   State<CrearCuentaPage> createState() => _CrearCuentaPageState();
 }
 
-class _CrearCuentaPageState extends State<CrearCuentaPage> {
-  final _nameController = TextEditingController();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-  bool _obscureText = true;
-  bool _loading = false;
+class _CrearCuentaPageState extends State<CrearCuentaPage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
 
+  final _formKey = GlobalKey<FormState>();
   final _auth = FirebaseAuth.instance;
   final _firestore = FirebaseFirestore.instance;
 
+  final nameCtrl = TextEditingController();
+  final emailCtrl = TextEditingController();
+  final passCtrl = TextEditingController();
+  final confirmCtrl = TextEditingController();
 
-  // Validación simple de email
-  bool isValidEmail(String email) {
-    return RegExp(r"^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$").hasMatch(email);
+  final isLoading = ValueNotifier(false);
+  final obscure1 = ValueNotifier(true);
+  final obscure2 = ValueNotifier(true);
+
+  static const Color primary = Color(0xFF388E3C);
+  static const Color darkGreen = Color(0xFF2E7D32);
+  static const Color bgLight = Color(0xFFF7F9F7);
+
+  @override
+  void dispose() {
+    nameCtrl.dispose();
+    emailCtrl.dispose();
+    passCtrl.dispose();
+    confirmCtrl.dispose();
+    isLoading.dispose();
+    obscure1.dispose();
+    obscure2.dispose();
+    super.dispose();
   }
 
-  // Mensaje SnackBar personalizado
-  void _showSnackBar(String message, IconData icon, Color color) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: Colors.black87,
-        behavior: SnackBarBehavior.floating,
-        content: Row(
-          children: [
-            Icon(icon, color: color),
-            const SizedBox(width: 10),
-            Expanded(child: Text(message)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _registerUser() async {
-    String name = _nameController.text.trim();
-    String email = _emailController.text.trim();
-    String password = _passwordController.text;
-
-    if (name.isEmpty || email.isEmpty || password.isEmpty) {
-      _showSnackBar('Completa todos los campos', Icons.warning, Colors.orange);
-      return;
-    }
-
-    if (!isValidEmail(email)) {
-      _showSnackBar('Correo electrónico no válido', Icons.email, Colors.red);
-      return;
-    }
-
-    if (password.length < 6) {
-      _showSnackBar('La contraseña debe tener al menos 6 caracteres', Icons.lock_outline, Colors.red);
-      return;
-    }
-
-    setState(() => _loading = true);
+  Future<void> _register() async {
+    if (!_formKey.currentState!.validate()) return;
+    isLoading.value = true;
 
     try {
-      UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
+      // Intenta crear el usuario con email y contraseña
+      final userCred = await _auth.createUserWithEmailAndPassword(
+        email: emailCtrl.text.trim(),
+        password: passCtrl.text.trim(),
       );
 
-      await userCredential.user!.sendEmailVerification();
+      // Si es exitoso, envía la verificación y guarda el perfil en Firestore
+      await Future.wait([
+        userCred.user!.sendEmailVerification(),
+        _firestore.collection('usuarios').doc(userCred.user!.uid).set({
+          'nombre': nameCtrl.text.trim(),
+          'email': emailCtrl.text.trim(),
+          'uid': userCred.user!.uid,
+          'fechaRegistro': Timestamp.now(),
+          'rol': widget.invernaderoIdToJoin != null ? 'empleado' : 'pendiente',
+          'invernaderoId': widget.invernaderoIdToJoin ?? '',
+        }),
+      ]);
 
-      await _firestore.collection('usuarios').doc(userCredential.user!.uid).set({
-        'nombre': name,
-        'email': email,
-        'uid': userCredential.user!.uid,
-        'fechaRegistro': Timestamp.now(),
-      });
-
-      _showSnackBar('Cuenta creada. Verifica tu correo.', Icons.check_circle, Colors.green);
-      Navigator.pushReplacementNamed(context, '/home');
-    } on FirebaseAuthException catch (e) {
-      String errorMessage = 'Error desconocido';
-      if (e.code == 'email-already-in-use') {
-        errorMessage = 'El correo ya está registrado.';
-      } else if (e.code == 'weak-password') {
-        errorMessage = 'Contraseña demasiado débil.';
-      } else if (e.code == 'invalid-email') {
-        errorMessage = 'Correo inválido.';
+      // 🟢 SOLUCIÓN: Borrar la ID pendiente de SharedPreferences una vez usada.
+      if (widget.invernaderoIdToJoin != null) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('pendingInvernaderoId');
+        debugPrint('🔗 ID de invernadero pendiente borrada de SharedPreferences.');
       }
-      _showSnackBar(errorMessage, Icons.error, Colors.red);
+      // ----------------------------------------------------------------------
+
+      if (!mounted) return;
+
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Cuenta creada. Hemos enviado un email a tu correo para su verificación.'),
+          backgroundColor: darkGreen,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+
+      await Future.delayed(const Duration(seconds: 2));
+
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => SeleccionRol(
+              invernaderoIdFromLink: widget.invernaderoIdToJoin,
+            ),
+          ),
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      String msg = 'Ocurrió un error';
+      if (e.code == 'email-already-in-use') {
+        msg = 'Este correo ya está registrado.';
+      } else if (e.code == 'weak-password') {
+        msg = 'La contraseña es muy débil.';
+      } else if (e.code == 'invalid-email') { // Agregamos manejo explícito del error de formato
+        msg = 'El formato del correo electrónico es incorrecto.';
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), backgroundColor: Colors.redAccent),
+      );
     } catch (e) {
-      _showSnackBar('Error: $e', Icons.error_outline, Colors.red);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error inesperado: $e'), backgroundColor: Colors.redAccent),
+      );
     } finally {
-      setState(() => _loading = false);
+      isLoading.value = false;
     }
   }
 
-  InputDecoration buildInput(String label, Icon icon) {
+  InputDecoration deco(String label, IconData icon, {Widget? suffix}) {
     return InputDecoration(
       labelText: label,
-      prefixIcon: icon,
+      prefixIcon: Icon(icon, color: primary.withOpacity(0.7)),
+      suffixIcon: suffix,
       filled: true,
-      fillColor: Colors.grey[100],
+      fillColor: const Color(0xFFF0F4F8),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         borderSide: BorderSide.none,
       ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Color(0xFF4CAF50), width: 2),
+      focusedBorder: const OutlineInputBorder(
+        borderRadius: BorderRadius.all(Radius.circular(14)),
+        borderSide: BorderSide(color: darkGreen, width: 2),
       ),
+      contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
+    final isLarge = MediaQuery.of(context).size.width > 800;
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
     return Scaffold(
-      backgroundColor: Colors.white,
+      resizeToAvoidBottomInset: false,
+      backgroundColor: bgLight,
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'BioSensor',
-                style: TextStyle(
-                  fontSize: 36,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF2E7D32),
-                  letterSpacing: 1.4,
-                ),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Crear cuenta',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 24),
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 12)],
-                ),
-                child: Column(
-                  children: [
-                    TextField(
-                      controller: _nameController,
-                      decoration: buildInput('Nombre completo', const Icon(Icons.person, color: Color(0xFF4CAF50))),
+        child: Row(
+          children: [
+            if (isLarge)
+              Expanded(
+                flex: 4,
+                child: Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Color(0xFF66BB6A), darkGreen],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
                     ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: _emailController,
-                      decoration: buildInput('Email', const Icon(Icons.email, color: Color(0xFF4CAF50))),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: _passwordController,
-                      obscureText: _obscureText,
-                      decoration: buildInput('Contraseña', const Icon(Icons.lock, color: Color(0xFF4CAF50))).copyWith(
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            _obscureText ? Icons.visibility_off : Icons.visibility,
-                            color: const Color(0xFF4CAF50),
-                          ),
-                          onPressed: () => setState(() => _obscureText = !_obscureText),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    ElevatedButton(
-                      onPressed: _loading ? null : _registerUser,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF388E3C),
-                        minimumSize: const Size(double.infinity, 50),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      child: _loading
-                          ? const CircularProgressIndicator(color: Colors.white)
-                          : const Text('Crear cuenta', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
+                  ),
+                  child: const Padding(
+                    padding: EdgeInsets.all(48),
+                    child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text("¿Ya tienes una cuenta? "),
-                        GestureDetector(
-                          onTap: () => Navigator.pushNamed(context, '/login'),
-                          child: const Text(
-                            "Inicia Sesión",
-                            style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2E7D32)),
+                        Icon(Icons.spa, color: Colors.white, size: 60),
+                        SizedBox(height: 24),
+                        Text(
+                          "Optimiza tu Cultivo con BioSensor",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 34,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
                       ],
-                    )
-                  ],
+                    ),
+                  ),
                 ),
               ),
-            ],
-          ),
+            Expanded(
+              flex: 5,
+              child: AnimatedPadding(
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeOut,
+                padding: EdgeInsets.only(bottom: bottomInset),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 420),
+                    child: ListView(
+                      physics: const ClampingScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
+                      children: [
+                        const Text(
+                          "Crear Cuenta",
+                          style: TextStyle(
+                            fontSize: 30,
+                            fontWeight: FontWeight.bold,
+                            color: darkGreen,
+                          ),
+                        ),
+                        const SizedBox(height: 25),
+                        Form(
+                          key: _formKey,
+                          child: FocusScope(
+                            child: Column(
+                              children: [
+                                TextFormField(
+                                  controller: nameCtrl,
+                                  validator: (v) => v!.isEmpty ? 'Nombre obligatorio' : null,
+                                  decoration: deco("Nombre completo", Icons.person),
+                                ),
+                                const SizedBox(height: 18),
+                                TextFormField(
+                                  controller: emailCtrl,
+                                  keyboardType: TextInputType.emailAddress,
+                                  // --- VALIDACIÓN MEJORADA ---
+                                  validator: (v) {
+                                    if (v == null || v.isEmpty) {
+                                      return 'Correo electrónico obligatorio';
+                                    }
+                                    // Patrón regex para una validación de correo robusta
+                                    const pattern = r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$';
+                                    final regExp = RegExp(pattern);
+
+                                    if (!regExp.hasMatch(v.trim())) {
+                                      return 'Formato de correo inválido (ej. usuario@dominio.com)';
+                                    }
+                                    return null;
+                                  },
+                                  // ---------------------------
+                                  decoration: deco("Correo electrónico", Icons.mail),
+                                ),
+                                const SizedBox(height: 18),
+                                ValueListenableBuilder(
+                                  valueListenable: obscure1,
+                                  builder: (_, bool val, __) => TextFormField(
+                                    controller: passCtrl,
+                                    validator: (v) => v!.length < 8 ? 'Mínimo 8 caracteres' : null,
+                                    obscureText: val,
+                                    decoration: deco(
+                                      "Contraseña",
+                                      Icons.lock_outline,
+                                      suffix: IconButton(
+                                        icon: Icon(
+                                          val ? Icons.visibility_off : Icons.visibility,
+                                          color: Colors.grey,
+                                        ),
+                                        onPressed: () => obscure1.value = !val,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 18),
+                                ValueListenableBuilder(
+                                  valueListenable: obscure2,
+                                  builder: (_, bool val, __) => TextFormField(
+                                    controller: confirmCtrl,
+                                    validator: (v) => v != passCtrl.text ? 'No coinciden' : null,
+                                    obscureText: val,
+                                    decoration: deco(
+                                      "Confirmar contraseña",
+                                      Icons.check_circle_outline,
+                                      suffix: IconButton(
+                                        icon: Icon(
+                                          val ? Icons.visibility_off : Icons.visibility,
+                                          color: Colors.grey,
+                                        ),
+                                        onPressed: () => obscure2.value = !val,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 30),
+                        ValueListenableBuilder(
+                          valueListenable: isLoading,
+                          builder: (_, bool val, __) => ElevatedButton(
+                            onPressed: val ? null : _register,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: primary,
+                              minimumSize: const Size(double.infinity, 56),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            child: val
+                                ? const SizedBox(
+                              height: 24,
+                              width: 24,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2.5,
+                              ),
+                            )
+                                : const Text(
+                              "Crear Cuenta",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        // Texto de retorno al login
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Text(
+                              "¿Ya eres miembro?",
+                              style: TextStyle(color: Colors.black54, fontSize: 15),
+                            ),
+                            TextButton(
+                              onPressed: () {
+                                Navigator.pushReplacementNamed(context, '/login');
+                              },
+                              child: const Text(
+                                "Inicia sesión",
+                                style: TextStyle(
+                                  color: primary,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
