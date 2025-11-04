@@ -401,8 +401,10 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Mis Invernaderos',
-            style: TextStyle(color: primaryGreen, fontWeight: FontWeight.bold)),
+        title: const Text(
+          'Mis Invernaderos',
+          style: TextStyle(color: primaryGreen, fontWeight: FontWeight.bold),
+        ),
         backgroundColor: Colors.white,
         elevation: 2,
         centerTitle: true,
@@ -451,8 +453,10 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
 
                 if (filtrados.isEmpty) {
                   return const Center(
-                    child: Text('No se encontraron invernaderos registrados.',
-                        style: TextStyle(fontSize: 16, color: Colors.black54)),
+                    child: Text(
+                      'No se encontraron invernaderos registrados.',
+                      style: TextStyle(fontSize: 16, color: Colors.black54),
+                    ),
                   );
                 }
 
@@ -470,6 +474,23 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
             ),
           ),
         ],
+      ),
+
+      // BOTÓN FLOTANTE
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const RegistroInvernaderoPage()),
+          );
+        },
+        backgroundColor: primaryGreen,
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.add_home_rounded),
+        label: const Text(
+          'Nuevo Invernadero',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
       ),
     );
   }
