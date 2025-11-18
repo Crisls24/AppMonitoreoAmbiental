@@ -3,7 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:invernadero/Pages/SideNav.dart';
-import 'package:invernadero/Pages/login.dart'; // Asumo que esta es la ruta correcta
+import 'package:invernadero/Pages/login.dart';
 
 const Color primaryGreen = Color(0xFF2E7D32);
 const Color accentGreen = Color(0xFF81C784);
@@ -18,11 +18,8 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage> {
   // Solo mantenemos en estado lo que es una carga única o variable local.
-  // La info del usuario se cargará con StreamBuilder.
   String _numInvernaderos = '0';
   String _profileImageUrl = 'https://placehold.co/120x120/E0E0E0/616161?text=U';
-
-  // Referencia al usuario y al stream del documento
   User? _currentUser;
   late Stream<DocumentSnapshot> _userStream;
 
@@ -36,13 +33,12 @@ class _ProfilePageState extends State<ProfilePage> {
         _navigateToLogin();
       });
     } else {
-      // 1. Inicializar la URL de la imagen y el Stream
+      // Inicializar la URL de la imagen y el Stream
       _profileImageUrl = _currentUser!.photoURL ?? _profileImageUrl;
       _userStream = FirebaseFirestore.instance
           .collection('usuarios')
           .doc(_currentUser!.uid)
           .snapshots();
-      // 2. Cargar el conteo de invernaderos (que es una carga única)
       _loadGreenhouseCount();
     }
   }
@@ -334,17 +330,18 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
-    // Si no hay usuario, muestra un contenedor vacío (ya se navegó en initState)
+    // Si no hay usuario, muestra un contenedor vacío
     if (_currentUser == null) {
       return const Scaffold(
           body: Center(
               child:
-              CircularProgressIndicator(color: primaryGreen)));
+              CircularProgressIndicator(color: primaryGreen))
+      );
     }
 
     return Scaffold(
       backgroundColor: lightBackground,
-      drawer: const Drawer(child: SideNav()),
+      drawer: Drawer(child: SideNav(currentRoute: 'Perfil')),
       appBar: AppBar(
         backgroundColor: primaryGreen,
         elevation: 0,
@@ -360,24 +357,20 @@ class _ProfilePageState extends State<ProfilePage> {
       body: StreamBuilder<DocumentSnapshot>(
         stream: _userStream,
         builder: (context, snapshot) {
-          // 1. Estado de error
+          // . Estado de error
           if (snapshot.hasError) {
             return Center(
                 child: Text('Error al cargar perfil: ${snapshot.error}',
                     textAlign: TextAlign.center));
           }
-
           // 2. Estado de carga
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(
                 child: CircularProgressIndicator(color: primaryGreen));
           }
-
           // 3. Datos listos
           final data = snapshot.data?.data() as Map<String, dynamic>?;
-
           if (data == null) {
-            // Documento no encontrado o vacío
             return Center(
               child: Padding(
                 padding: const EdgeInsets.all(32.0),
@@ -397,8 +390,6 @@ class _ProfilePageState extends State<ProfilePage> {
               ),
             );
           }
-
-          // 4. Mostrar el cuerpo del perfil con los datos obtenidos
           return _buildProfileBody(data);
         },
       ),

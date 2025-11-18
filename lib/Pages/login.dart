@@ -17,9 +17,8 @@ class InicioSesion extends StatefulWidget {
 }
 
 class _InicioSesionState extends State<InicioSesion> {
-  // 🔑 Clave para el formulario
+  //  Clave para el formulario
   final _formKey = GlobalKey<FormState>();
-
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final ValueNotifier<bool> _loadingNotifier = ValueNotifier(false);
@@ -45,7 +44,7 @@ class _InicioSesionState extends State<InicioSesion> {
       _pendingInvernadero = saved;
     });
     if (saved != null) {
-      debugPrint('📥 Cargado pendingInvernaderoId: $saved');
+      debugPrint('Cargado pendingInvernaderoId: $saved');
     }
   }
 
@@ -59,9 +58,8 @@ class _InicioSesionState extends State<InicioSesion> {
 
   // 🔹 Iniciar sesión con email y contraseña
   Future<void> _loginUser() async {
-    // 🛑 VALIDACIÓN CLAVE: Muestra errores de forma inmediata si los campos están vacíos.
     if (!_formKey.currentState!.validate()) {
-      debugPrint('🛑 Validación fallida: Campos vacíos detectados.');
+      debugPrint(' Validación fallida: Campos vacíos detectados.');
       return;
     }
 
@@ -74,7 +72,7 @@ class _InicioSesionState extends State<InicioSesion> {
 
       final user = userCredential.user;
       if (user != null) {
-        debugPrint('✅ Sesión iniciada localmente para ${user.email}');
+        debugPrint(' Sesión iniciada localmente para ${user.email}');
         await _navigateAfterLogin(user);
       }
     } on FirebaseAuthException catch (e) {
@@ -103,7 +101,7 @@ class _InicioSesionState extends State<InicioSesion> {
     }
   }
 
-  // 🔹 Iniciar sesión con Google
+  //  Iniciar sesión con Google
   Future<void> _loginWithGoogle() async {
     _loadingNotifier.value = true;
     try {
@@ -138,10 +136,10 @@ class _InicioSesionState extends State<InicioSesion> {
             'rol': savedInvernadero != null ? 'empleado' : 'pendiente',
           });
 
-          debugPrint('🆕 Nuevo usuario creado con Google: ${user.email}');
+          debugPrint('Nuevo usuario creado con Google: ${user.email}');
         }
 
-        debugPrint('✅ Sesión iniciada con Google para ${user.email}');
+        debugPrint(' Sesión iniciada con Google para ${user.email}');
         await _navigateAfterLogin(user);
       }
     } catch (e) {
@@ -155,7 +153,7 @@ class _InicioSesionState extends State<InicioSesion> {
     }
   }
 
-  // 🔹 Decide a dónde redirigir después del login
+  // Decide a dónde redirigir después del login
   Future<void> _navigateAfterLogin(User user) async {
     final docRef = _firestore.collection('usuarios').doc(user.uid);
     final doc = await docRef.get();
@@ -170,16 +168,14 @@ class _InicioSesionState extends State<InicioSesion> {
         (data['invernaderoId'] as String?) ??
             (data['greenhouseId'] as String?) ??
             '';
-
-    // Combina los posibles orígenes del ID para la navegación
     final String? invernaderoToJoin = widget.invernaderoIdToJoin?.isNotEmpty == true
         ? widget.invernaderoIdToJoin
         : _pendingInvernadero;
 
-    debugPrint('🔍 LOGIN_NAV → rol=$normalizedRol, invernaderoExistente=$invernaderoIdExistente');
-    debugPrint('🔗 LOGIN_NAV → invernaderoToJoin=$invernaderoToJoin');
+    debugPrint(' LOGIN_NAV → rol=$normalizedRol, invernaderoExistente=$invernaderoIdExistente');
+    debugPrint(' LOGIN_NAV → invernaderoToJoin=$invernaderoToJoin');
 
-    // 🔸 Si vino desde link de invitación (prioridad alta)
+    //  Si vino desde link de invitación (prioridad alta)
     if (invernaderoToJoin != null && invernaderoToJoin.isNotEmpty) {
       debugPrint('📩 Usuario vino desde link ($invernaderoToJoin)');
 
@@ -265,8 +261,8 @@ class _InicioSesionState extends State<InicioSesion> {
                     BoxShadow(color: Colors.black26, blurRadius: 12, offset: Offset(0, 6)),
                   ],
                 ),
-                child: Form( // 💡 Agregado el widget Form
-                  key: _formKey, // 🔑 Asignada la clave
+                child: Form(
+                  key: _formKey,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -311,7 +307,7 @@ class _InicioSesionState extends State<InicioSesion> {
                       const SizedBox(height: 30),
 
                       // Email (TextFormField con validación)
-                      TextFormField( // 💡 Cambiado a TextFormField
+                      TextFormField(
                         controller: _emailController,
                         keyboardType: TextInputType.emailAddress,
                         decoration: InputDecoration(
@@ -332,7 +328,7 @@ class _InicioSesionState extends State<InicioSesion> {
                       const SizedBox(height: 20),
 
                       // Contraseña (TextFormField con validación)
-                      TextFormField( // 💡 Cambiado a TextFormField
+                      TextFormField(
                         controller: _passwordController,
                         obscureText: _obscure,
                         decoration: InputDecoration(

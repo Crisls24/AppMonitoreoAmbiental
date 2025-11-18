@@ -49,7 +49,7 @@ class _SeleccionRolState extends State<SeleccionRol>
     _invernaderoIdFromLink = widget.invernaderoIdFromLink;
 
     if (_invernaderoIdFromLink != null && _invernaderoIdFromLink!.isNotEmpty) {
-      debugPrint('🔗 Invernadero detectado desde link: $_invernaderoIdFromLink');
+      debugPrint('Invernadero detectado desde link: $_invernaderoIdFromLink');
       _isJoiningFromLink = true;
       _invernaderoIdController.text = _invernaderoIdFromLink!;
 
@@ -188,7 +188,7 @@ class _SeleccionRolState extends State<SeleccionRol>
   }
 
   Future<void> _handleAdminRole() async {
-    if (_isJoiningFromLink) return; // 🔒 Bloquea si vino desde link
+    if (_isJoiningFromLink) return;
 
     if (currentUser == null) return;
     try {
@@ -273,7 +273,7 @@ class _SeleccionRolState extends State<SeleccionRol>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bgColor = isDark ? backgroundDark : backgroundLight;
 
-    // 🔄 Si viene desde link, muestra pantalla de carga
+    // Si viene desde link, muestra pantalla de carga
     if (_isJoiningFromLink) {
       return Scaffold(
         backgroundColor: bgColor,
@@ -293,7 +293,7 @@ class _SeleccionRolState extends State<SeleccionRol>
       );
     }
 
-    // 🌿 Flujo normal o restringido
+    //  Flujo normal
     return WillPopScope(
       onWillPop: _confirmExit,
       child: Scaffold(
@@ -341,7 +341,7 @@ class _SeleccionRolState extends State<SeleccionRol>
                       ),
                       const SizedBox(height: 40),
 
-                      // 🔒 Ocultar opción de administrador si viene del link
+                      // Ocultar opción de administrador si viene del link
                       if (!_isJoiningFromLink)
                         _buildRoleCard(
                           icon: Icons.manage_accounts_rounded,

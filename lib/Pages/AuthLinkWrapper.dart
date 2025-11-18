@@ -3,8 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:app_links/app_links.dart';
-
-
 import 'package:invernadero/Pages/GestionInvernadero.dart';
 import 'package:invernadero/Pages/HomePage.dart';
 import 'package:invernadero/Pages/login.dart';
@@ -39,33 +37,28 @@ class _AuthLinkWrapperState extends State<AuthLinkWrapper> {
   }
 
   Future<void> _initialize() async {
-    // Capturar Deep Link inicial
+    // Capturar Link inicial
     try {
-      final initialUri = await _appLinks.getInitialLink(); // ✅ cambio aquí
+      final initialUri = await _appLinks.getInitialLink();
       _handleLink(initialUri);
     } catch (e) {
       debugPrint('Error al obtener el link inicial: $e');
     }
-
-    // Escuchar nuevos Deep Links
+    // Escuchar nuevos Links
     _linkSub = _appLinks.uriLinkStream.listen((Uri? uri) {
       if (mounted) _handleLink(uri);
     }, onError: (err) {
       debugPrint('Error en el stream del link: $err');
     });
-
     // Esperar a que FirebaseAuth emita el usuario actual
     _auth.authStateChanges().listen((user) async {
       await _handleAuthState(user);
     });
-
-    // Evitar que se quede colgado si Firebase tarda
     await Future.delayed(const Duration(seconds: 3));
     if (mounted && _isLoading) {
       setState(() => _isLoading = false);
     }
   }
-
   // Manejo de los enlaces
   void _handleLink(Uri? uri) {
     if (uri != null && uri.queryParameters.containsKey('invernadero')) {
@@ -74,7 +67,7 @@ class _AuthLinkWrapperState extends State<AuthLinkWrapper> {
         setState(() {
           _invernaderoIdFromLink = id;
         });
-        debugPrint('✅ Deep Link capturado: $id');
+        debugPrint('Deep Link capturado: $id');
       }
     }
   }
@@ -82,7 +75,7 @@ class _AuthLinkWrapperState extends State<AuthLinkWrapper> {
   // Maneja el estado de autenticación y rol del usuario
   Future<void> _handleAuthState(User? user) async {
     if (user == null) {
-      // No autenticado → Login
+      // No autenticado
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -90,12 +83,10 @@ class _AuthLinkWrapperState extends State<AuthLinkWrapper> {
       }
       return;
     }
-
     try {
       final doc = await _firestore.collection('usuarios').doc(user.uid).get();
-
       if (!doc.exists) {
-        // No tiene registro en Firestore → selección de rol
+        // No tiene registro en Firestore / selección de rol
         if (mounted) {
           setState(() {
             _isLoading = false;
@@ -107,7 +98,7 @@ class _AuthLinkWrapperState extends State<AuthLinkWrapper> {
       final data = doc.data() as Map<String, dynamic>?;
 
       if (data == null || !data.containsKey('rol') || data['rol'] == null) {
-        // No tiene campo "rol"
+        // No tiene rol
         if (mounted) {
           setState(() {
             _isLoading = false;
@@ -138,7 +129,6 @@ class _AuthLinkWrapperState extends State<AuthLinkWrapper> {
         ),
       );
     }
-
     if (user == null) {
       return InicioSesion(invernaderoIdToJoin: _invernaderoIdFromLink);
     }
@@ -153,13 +143,10 @@ class _AuthLinkWrapperState extends State<AuthLinkWrapper> {
             body: Center(child: CircularProgressIndicator(color: Color(0xFF2E7D32))),
           );
         }
-
         final data = snapshot.data?.data() as Map<String, dynamic>?;
-
         if (data == null || !data.containsKey('rol') || data['rol'] == null) {
           return SeleccionRol(invernaderoIdFromLink: _invernaderoIdFromLink);
         }
-
         if (data['rol'] == 'dueño') {
           return const Gestioninvernadero();
         } else if (data['rol'] == 'empleado') {

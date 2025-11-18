@@ -22,9 +22,7 @@ class _SplashScreenState extends State<SplashScreen>
   late Animation<Offset> _slideUp;
 
   bool _firebaseReady = false;
-  //  Bandera de control para la inicialización completa de Firebase/Links
   bool _isInitialized = false;
-
   // Variables de Deep Link
   final AppLinks _appLinks = AppLinks();
   StreamSubscription<Uri>? _linkSub;
@@ -33,21 +31,14 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   void initState() {
     super.initState();
-
-    // Primero configurar animaciones
     _setupAnimations();
-
-    // Cuando termina la animación, verificamos si ya puede navegar
     _mainController.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
         _checkReadyToNavigate();
       }
     });
-
     // Iniciamos animación y proceso en paralelo
     _mainController.forward();
-
-    // Agregamos un microdelay para asegurar que la animación "se vea" antes de Firebase
     Future.delayed(const Duration(milliseconds: 400), _initializeApp);
   }
 
@@ -69,10 +60,10 @@ class _SplashScreenState extends State<SplashScreen>
 
     // Captura de Deep Link Inicial
     try {
-      final initialUri = await _appLinks.getInitialLink(); // ✅ corregido
+      final initialUri = await _appLinks.getInitialLink();
       _handleLink(initialUri);
     } on PlatformException {
-      debugPrint('⚠️ Error al obtener el deep link inicial.');
+      debugPrint('Error al obtener el deep link inicial.');
     }
 
     // Listener de Deep Link Stream
@@ -83,8 +74,6 @@ class _SplashScreenState extends State<SplashScreen>
     }, onError: (err) {
       debugPrint('Error en el stream del link: $err');
     });
-
-    // Pequeño delay de seguridad
     await Future.delayed(const Duration(seconds: 3));
 
     if (mounted) {
@@ -102,7 +91,6 @@ class _SplashScreenState extends State<SplashScreen>
       final id = uri.queryParameters['invernadero'];
 
       if (id != null && id.isNotEmpty) {
-        // Solo actualizamos el estado, la navegación se controla con _checkReadyToNavigate.
         setState(() {
           _invernaderoIdFromLink = id;
         });
@@ -116,8 +104,6 @@ class _SplashScreenState extends State<SplashScreen>
     if (!mounted) return;
     final currentUser = FirebaseAuth.instance.currentUser;
     final idToJoin = _invernaderoIdFromLink;
-
-    // Si no hay sesión → login
     if (currentUser == null) {
       if (mounted) Navigator.pushReplacementNamed(context, '/login');
       return;
@@ -131,7 +117,6 @@ class _SplashScreenState extends State<SplashScreen>
           .get();
       if (!mounted) return;
       if (!doc.exists) {
-        // No tiene documento → selección de rol
         Navigator.pushReplacementNamed(context, '/seleccionrol');
         return;
       }
@@ -256,7 +241,6 @@ class _SplashScreenState extends State<SplashScreen>
                       ),
                       const SizedBox(height: 35),
                       // Indicador de carga visual
-                      // Muestra el indicador mientras la animación corre O mientras Firebase no está listo
                       if (!_isInitialized || _mainController.isAnimating) const DotsLoading(),
                     ],
                   ),

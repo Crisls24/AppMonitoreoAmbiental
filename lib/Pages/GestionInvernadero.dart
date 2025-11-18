@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:invernadero/Pages/RegistroInvernadero.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:invernadero/Pages/SideNav.dart';
 
 
 class Gestioninvernadero extends StatefulWidget {
@@ -179,9 +180,7 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
         .where('invernaderoId', isEqualTo: invernaderoId)
         .where('rol', isEqualTo: 'empleado')
         .get();
-
     final colaboradores = snapshot.docs;
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -273,6 +272,7 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
                       trailing: IconButton(
                         icon: const Icon(Icons.remove_circle_outline, color: Colors.redAccent),
                         onPressed: () async {
+                          // Implementar un diálogo de confirmación antes de eliminar el colaborador
                           await _firestore.collection('usuarios').doc(colaboradores[i].id).delete();
                           Navigator.pop(context);
                           _showSnackBar('Colaborador eliminado', Icons.person_remove, Colors.redAccent);
@@ -370,15 +370,18 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
                             borderRadius: BorderRadius.circular(10)),
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 8), // Espacio entre botones
                     // Botón Visitar
                     ElevatedButton.icon(
-                      onPressed: ()=> Navigator.pushNamed(context, '/home'),
-                      icon: const Icon(Icons.pie_chart_rounded, size: 20, color: Colors.white),
-                      label: const Text('Visitar',
-                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                      onPressed: () {
+                        // Navega a la página de inicio
+                        Navigator.pushNamed(context, '/home');
+                      },
+                      icon: const Icon(Icons.open_in_new_rounded, size: 20),
+                      label: const Text('Visitar'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: primaryGreen,
+                        foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10)),
                       ),
@@ -400,6 +403,7 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
     }
 
     return Scaffold(
+      drawer: Drawer(child: SideNav(currentRoute: 'gestion')),
       appBar: AppBar(
         title: const Text(
           'Mis Invernaderos',
@@ -461,7 +465,8 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
                 }
 
                 return ListView.builder(
-                  padding: const EdgeInsets.all(16),
+                  // Añadimos padding inferior aquí para dar espacio al FloatingActionButton
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
                   itemCount: filtrados.length,
                   itemBuilder: (context, i) {
                     final doc = filtrados[i];

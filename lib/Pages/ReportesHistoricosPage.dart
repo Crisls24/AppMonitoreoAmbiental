@@ -4,12 +4,11 @@ import 'dart:math';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:invernadero/Pages/SideNav.dart';
 
 const Color primaryGreen = Color(0xFF2E7D32);
 const Color secondaryGreen = Color(0xFF388E3C);
 
-
-// MODELOS Y DATOS
 // Estructura de Datos Históricos
 class DatosHistoricos {
   final double tempPromedio;
@@ -168,7 +167,6 @@ class HistoricalDataService {
     final now = DateTime.now();
     // Ajusta la longitud para 'Día' basándose en la hora actual
     // final currentPoints = now.hour + 1;
-
     final Map<String, DatosHistoricos> mockData = {
       'Día': DatosHistoricos(
         tempPromedio: 26.5, tempMaxima: 30.5, humedadPromedio: 70.0, luminosidadPromedio: 400.0,
@@ -633,6 +631,7 @@ class _ReportesHistoricosPageState extends State<ReportesHistoricosPage> {
     const Color primaryColor = Color(0xFF2E7D32);
 
     return Scaffold(
+      drawer: Drawer(child: SideNav(currentRoute: 'reportes')),
       appBar: AppBar(
         title: const Text('Reportes Históricos', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         backgroundColor: primaryGreen,

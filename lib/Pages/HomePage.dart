@@ -92,7 +92,7 @@ class _HomePageState extends State<HomePage> {
         foregroundColor: primaryGreen,
         elevation: 0,
       ),
-      drawer: const SideNav(),
+      drawer: Drawer(child: SideNav(currentRoute: 'home')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 20),
         child: DefaultTabController(

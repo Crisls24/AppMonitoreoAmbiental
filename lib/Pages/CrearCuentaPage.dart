@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:invernadero/Pages/SeleccionRol.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // Importación necesaria
+import 'package:shared_preferences/shared_preferences.dart';
 
 class CrearCuentaPage extends StatefulWidget {
   final String? invernaderoIdToJoin;
@@ -51,7 +51,7 @@ class _CrearCuentaPageState extends State<CrearCuentaPage>
     isLoading.value = true;
 
     try {
-      // Intenta crear el usuario con email y contraseña
+      // Crea el usuario con email y contraseña
       final userCred = await _auth.createUserWithEmailAndPassword(
         email: emailCtrl.text.trim(),
         password: passCtrl.text.trim(),
@@ -69,30 +69,22 @@ class _CrearCuentaPageState extends State<CrearCuentaPage>
           'invernaderoId': widget.invernaderoIdToJoin ?? '',
         }),
       ]);
-
-      // 🟢 SOLUCIÓN: Borrar la ID pendiente de SharedPreferences una vez usada.
       if (widget.invernaderoIdToJoin != null) {
         final prefs = await SharedPreferences.getInstance();
         await prefs.remove('pendingInvernaderoId');
         debugPrint('🔗 ID de invernadero pendiente borrada de SharedPreferences.');
       }
-      // ----------------------------------------------------------------------
-
       if (!mounted) return;
-
       await Future.delayed(const Duration(milliseconds: 500));
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Cuenta creada. Hemos enviado un email a tu correo para su verificación.'),
+          content: const Text('Cuenta creada. Hemos enviado un email a tu correo.'),
           backgroundColor: darkGreen,
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
-
       await Future.delayed(const Duration(seconds: 2));
-
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -223,21 +215,19 @@ class _CrearCuentaPageState extends State<CrearCuentaPage>
                                 TextFormField(
                                   controller: emailCtrl,
                                   keyboardType: TextInputType.emailAddress,
-                                  // --- VALIDACIÓN MEJORADA ---
+                                  // VALIDACIÓN
                                   validator: (v) {
                                     if (v == null || v.isEmpty) {
                                       return 'Correo electrónico obligatorio';
                                     }
-                                    // Patrón regex para una validación de correo robusta
+                                    // Validación de correo robusta
                                     const pattern = r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$';
                                     final regExp = RegExp(pattern);
-
                                     if (!regExp.hasMatch(v.trim())) {
-                                      return 'Formato de correo inválido (ej. usuario@dominio.com)';
+                                      return 'Formato de correo inválido (ej. usuario@gmail.com)';
                                     }
                                     return null;
                                   },
-                                  // ---------------------------
                                   decoration: deco("Correo electrónico", Icons.mail),
                                 ),
                                 const SizedBox(height: 18),

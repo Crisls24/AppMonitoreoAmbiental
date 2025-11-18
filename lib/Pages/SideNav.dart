@@ -42,8 +42,8 @@ class AppTheme {
 }
 
 class SideNav extends StatefulWidget {
-  const SideNav({super.key});
-
+  final String currentRoute;
+  const SideNav({super.key, required this.currentRoute});
   @override
   State<SideNav> createState() => _SideNavState();
 }
@@ -51,8 +51,6 @@ class SideNav extends StatefulWidget {
 class _SideNavState extends State<SideNav> {
   User? _currentUser;
   late StreamSubscription<User?> _authStateSubscription;
-
-  int _selectedIndex = 0;
 
   @override
   void initState() {
@@ -89,50 +87,8 @@ class _SideNavState extends State<SideNav> {
     }
   }
 
-  Widget _buildMenuItem({
-    required String title,
-    required IconData icon,
-    required VoidCallback onTap,
-    required bool isSelected,
-  }) {
-    final color = isSelected ? AppTheme.primaryColor : AppTheme.secondaryText;
-    final backgroundColor = isSelected ? AppTheme.primaryColor.withOpacity(0.1) : AppTheme.secondaryBackground;
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Material(
-        color: backgroundColor,
-        borderRadius: BorderRadius.circular(8),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(8),
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(8),
-            child: Row(
-              mainAxisSize: MainAxisSize.max,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Icon(icon, color: color, size: 28),
-                Padding(
-                  padding: const EdgeInsets.only(left: 12),
-                  child: Text(
-                    title,
-                    style: AppTheme.bodyLarge.copyWith(color: color),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _navigateAndSelect(BuildContext context, Widget page, int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
+  // FUNCIÓN DE NAVEGACIÓN SIMPLIFICADA (sin actualizar el estado interno)
+  void _navigate(BuildContext context, Widget page) {
     Navigator.pop(context); // Cierra el drawer
     if (page is HomePage) {
       Navigator.pushAndRemoveUntil(
@@ -145,29 +101,76 @@ class _SideNavState extends State<SideNav> {
     }
   }
 
+  Widget _buildMenuItem({
+    required String title,
+    required IconData icon,
+    required VoidCallback onTap,
+    required String routeId,
+  }) {
+    final isSelected = widget.currentRoute.toLowerCase() == routeId.toLowerCase();
+    final color = isSelected ? AppTheme.primaryColor : AppTheme.secondaryText;
+    final backgroundColor = isSelected ? AppTheme.primaryColor.withOpacity(0.1) : Colors.transparent;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Container(
+        // Indicador de selección lateral (barra verde)
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          borderRadius: BorderRadius.circular(8),
+          // Si está seleccionado, agregamos un borde izquierdo para simular la barra verde
+          border: isSelected
+              ? Border(left: BorderSide(color: AppTheme.primaryColor, width: 4))
+              : null,
+        ),
+        child: Material(
+          // Material es necesario para InkWell
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.max,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Icon(icon, color: color, size: 28),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 12),
+                    child: Text(
+                      title,
+                      style: AppTheme.bodyLarge.copyWith(color: color, fontWeight: isSelected ? FontWeight.bold : FontWeight.w500),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    // LÓGICA DE USUARIO MEJORADA PARA EVITAR "USUARIO INVITADO"
     final bool isAuthenticated = _currentUser != null;
     String userName;
     String userEmail;
     String profileImageUrl;
 
     if (isAuthenticated) {
-      // 1. Intenta usar displayName.
-      // 2. Si displayName es null, usa el email (o la parte antes de @) como nombre.
       userName = _currentUser!.displayName ??
           (_currentUser!.email?.split('@').first ?? 'Usuario Autenticado');
       userEmail = _currentUser!.email ?? 'Email No Disponible';
       profileImageUrl = _currentUser!.photoURL ?? 'https://placehold.co/44x44/E0E0E0/616161?text=U';
     } else {
-      // Usuario no autenticado
       userName = 'Usuario Invitado';
       userEmail = 'invitado@ejemplo.com';
-      profileImageUrl = 'https://placehold.co/44x44/E0E0E0/616161?text=I'; // Ícono de invitado
+      profileImageUrl = 'https://placehold.co/44x44/E0E0E0/616161?text=I';
     }
-    // FIN LÓGICA MEJORADA
 
     return Container(
       width: 270,
@@ -210,36 +213,51 @@ class _SideNavState extends State<SideNav> {
           _buildMenuItem(
             title: 'Dashboard',
             icon: Icons.dashboard_rounded,
-            isSelected: _selectedIndex == 0,
-            onTap: () => _navigateAndSelect(context, const HomePage(), 0),
+            routeId: 'home',
+            onTap: () => _navigate(context, const HomePage()),
           ),
 
           _buildMenuItem(
             title: 'Invernaderos',
             icon: Icons.energy_savings_leaf,
-            isSelected: _selectedIndex == 5,
-            onTap: () => _navigateAndSelect(context, const Gestioninvernadero(), 5),
+            routeId: 'gestion',
+            onTap: () => _navigate(context, const Gestioninvernadero()),
           ),
 
           _buildMenuItem(
             title: 'Reportes',
             icon: Icons.document_scanner_rounded,
-            isSelected: _selectedIndex == 2,
-            onTap: () => _navigateAndSelect(context, const ReportesHistoricosPage(), 2),
+            routeId: 'reportes',
+            onTap: () => _navigate(context, const ReportesHistoricosPage()),
           ),
 
           _buildMenuItem(
             title: 'Empleados',
             icon: Icons.groups,
-            isSelected: _selectedIndex == 3,
-            onTap: () => _navigateAndSelect(context, const EmpleadosPage(), 3),
+            routeId: 'empleado',
+            onTap: () => _navigate(context, const EmpleadosPage()),
+          ),
+
+          _buildMenuItem(
+            title: 'Sensores',
+            icon: Icons.groups,
+            routeId: 'sensor',
+            onTap: () {
+              Navigator.pop(context);
+              const String invernaderoIdFijo = 'PROTOTIPO';
+              Navigator.pushNamed(
+                context,
+                'sensor',
+                arguments: invernaderoIdFijo,
+              );
+            },
           ),
 
           _buildMenuItem(
             title: 'Perfil',
             icon: Icons.account_circle_rounded,
-            isSelected: _selectedIndex == 4,
-            onTap: () => _navigateAndSelect(context, const ProfilePage(), 4),
+            routeId: 'perfil',
+            onTap: () => _navigate(context, const ProfilePage()),
           ),
           const SizedBox(height: 50),
           Divider(
@@ -296,9 +314,8 @@ class _SideNavState extends State<SideNav> {
                           child: Material(
                             color: Colors.transparent,
                             child: InkWell(
-                              onTap: () => _navigateAndSelect(context, const ProfilePage(), 4),
+                              onTap: () => _navigate(context, const ProfilePage()),
                               child: Text(
-                                // Muestra el email si está autenticado, sino "View Profile"
                                 isAuthenticated ? userEmail : 'View Profile',
                                 style: AppTheme.bodySmall.copyWith(
                                     color: isAuthenticated ? AppTheme.secondaryText : AppTheme.primaryColor

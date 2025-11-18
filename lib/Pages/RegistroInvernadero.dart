@@ -81,23 +81,19 @@ class _RegistroInvernaderoPageState extends State<RegistroInvernaderoPage> {
       });
 
       final invernaderoId = docRef.id;
-
       // Actualizar al usuario con su nuevo invernadero y rol
       await _firestore.collection('usuarios').doc(userId).set({
         'rol': 'dueño',
         'invernaderoId': invernaderoId,
         'roleStatus': 'complete',
       }, SetOptions(merge: true));
-
       _showSnackBar(
         'Invernadero "$nombre" registrado con éxito.',
         Icons.check_circle,
         softGreen,
       );
-
-      // Redirigir al panel de gestión
       if (mounted) {
-        Navigator.pushReplacementNamed(context, '/gestion');
+        Navigator.pop(context); // Regresa a Gestioninvernadero
       }
     } on FirebaseException catch (e) {
       _showSnackBar('Error de Firebase: ${e.message}', Icons.error, Colors.red);
@@ -179,27 +175,13 @@ class _RegistroInvernaderoPageState extends State<RegistroInvernaderoPage> {
     );
   }
 
-  // Nueva función para manejar el regreso a la selección de rol
-  void _safeNavigateBack(BuildContext context) {
-    Navigator.pushReplacementNamed(context, '/seleccionrol');
-  }
-
   @override
   Widget build(BuildContext context) {
 
-    final Widget formAndButton = RepaintBoundary(
+    final Widget formContent = RepaintBoundary(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: IconButton(
-              icon: const Icon(Icons.arrow_back_ios, color: primaryGreen),
-              onPressed: () => _safeNavigateBack(context),
-              tooltip: 'Volver a la selección de rol',
-            ),
-          ),
-          const SizedBox(height: 10),
           _buildHeader(),
           Form(
             key: _formKey,
@@ -244,9 +226,7 @@ class _RegistroInvernaderoPageState extends State<RegistroInvernaderoPage> {
               ],
             ),
           ),
-
           const SizedBox(height: 50),
-
           // OPTIMIZACIÓN: ValueListenableBuilder para aislar el estado del botón
           ValueListenableBuilder<bool>(
             valueListenable: _loadingNotifier,
@@ -281,18 +261,18 @@ class _RegistroInvernaderoPageState extends State<RegistroInvernaderoPage> {
         ],
       ),
     );
-    return WillPopScope(
-      onWillPop: () async {
-        _safeNavigateBack(context);
-        return false;
-      },
-      child: Scaffold(
-        backgroundColor: backgroundLight,
-        body: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-            child: formAndButton,
-          ),
+    // Usamos el Scaffold con AppBar para el manejo de navegación estándar.
+    return Scaffold(
+      backgroundColor: backgroundLight,
+      appBar: AppBar(
+        title: const Text('Registro de Invernadero', style: TextStyle(color: primaryGreen)),
+        backgroundColor: Colors.white,
+        elevation: 1,
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+          child: formContent,
         ),
       ),
     );

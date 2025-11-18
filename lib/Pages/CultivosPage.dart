@@ -2,17 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-// DATOS GLOBALES
 const Color primaryGreen = Color(0xFF2E7D32);
-const Color secondaryGreen = Color(0xFF388E3C); //color de iconos
+const Color secondaryGreen = Color(0xFF388E3C);
 const Color backgroundColor = Color(0xFFF8F5ED);
 
-// Lista de Cultivos Comunes s
-final List<String> listaCultivos = ['Jitomate', 'Pepino', 'Pimiento', 'Fresa', 'Chile', 'Calabaza'];
+final List<String> listaCultivos = ['Jitomate', 'Pepino', 'Pimiento', 'Fresa', 'Calabaza'];
 final List<String> listaFases = ['Germinación', 'Crecimiento Vegetativo', 'Floración', 'Fructificación', 'Cosecha'];
 final List<String> listaSustratos = ['Tierra', 'Fibra de Coco', 'Lana de Roca', 'Hidroponía'];
 
-// CLASE DE DATOS DEL INVERNADERO
 class InvernaderoData {
   final double superficieM2;
   final List<String> lotesDisponibles = const ['Norte', 'Centro', 'Sur'];
@@ -22,13 +19,13 @@ class InvernaderoData {
   });
 }
 
-// INVERNADERO SELECTOR (VALIDACIÓN DE LOTES)
+// VALIDACIÓN DE LOTES
 
 class InvernaderoSelector extends StatelessWidget {
   final InvernaderoData data;
   final List<String> selectedLotes;
   final Function(String) onLoteToggled;
-  final Set<String> lotesOcupados; // deshabilitar visual y funcionalmente
+  final Set<String> lotesOcupados;
 
   const InvernaderoSelector({
     super.key,
@@ -50,7 +47,6 @@ class InvernaderoSelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final double areaPorSeccion = data.superficieM2 / data.lotesDisponibles.length;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -61,7 +57,6 @@ class InvernaderoSelector extends StatelessWidget {
             style: TextStyle(fontSize: 14, color: Colors.grey[600]),
           ),
         ),
-
         Container(
           height: 120,
           decoration: BoxDecoration(
@@ -114,9 +109,7 @@ class InvernaderoSelector extends StatelessWidget {
             }).toList(),
           ),
         ),
-
         const SizedBox(height: 8),
-
         Text(
           selectedLotes.isEmpty && lotesOcupados.length < 3
               ? 'Selecciona al menos una sección disponible a sembrar'
@@ -127,7 +120,6 @@ class InvernaderoSelector extends StatelessWidget {
             color: selectedLotes.isEmpty ? Colors.redAccent : primaryGreen,
           ),
         ),
-
         // Mensaje de validación si no se selecciona nada y se intenta guardar
         if (selectedLotes.isEmpty)
           const Padding(
@@ -163,17 +155,12 @@ class _CultivoPageState extends State<CultivoPage> {
   String _programaRiego = '';
   String _fertilizante = '';
   final _formKey = GlobalKey<FormState>();
-
-  // Datos cargados asíncronamente
   late Future<InvernaderoData> _invernaderoDataFuture;
-
-  // Variable para almacenar los lotes ya ocupados
   Set<String> _lotesOcupados = {};
 
   @override
   void initState() {
     super.initState();
-    // La carga inicial se adapta para devolver InvernaderoData
     _invernaderoDataFuture = _loadInvernaderoData(widget.invernaderoId);
   }
 
@@ -185,32 +172,27 @@ class _CultivoPageState extends State<CultivoPage> {
       DocumentSnapshot invernaderoDoc = await firestore.collection('invernaderos').doc(id).get();
       final data = invernaderoDoc.data() as Map<String, dynamic>?;
       final double superficie = (data?['superficie_m2'] as num?)?.toDouble() ?? 0.0;
-
       //Cargar lotes ocupados por otros cultivos
       QuerySnapshot cultivosSnapshot = await firestore
           .collection('cultivos')
           .where('invernaderoId', isEqualTo: id)
           .get();
-
       Set<String> ocupados = {};
       for (var doc in cultivosSnapshot.docs) {
         final cultivoData = doc.data() as Map<String, dynamic>;
         List<String> lotes = List<String>.from(cultivoData['lotes'] ?? []);
         ocupados.addAll(lotes);
       }
-
       // Actualiza el estado de los lotes ocupados
       if (mounted) {
         setState(() {
           _lotesOcupados = ocupados;
         });
       }
-
       if (superficie <= 0.0) {
         throw Exception("Superficie del invernadero es 0.");
       }
       return InvernaderoData(superficieM2: superficie);
-
     } catch (e) {
       print('Error cargando datos: $e');
       throw Exception('Fallo al cargar la configuración del invernadero y cultivos existentes.');
@@ -238,7 +220,6 @@ class _CultivoPageState extends State<CultivoPage> {
     });
   }
 
-
   // FUNCIÓN DE GUARDAR
   void _saveCultivo() async {
     // Validación de lotes seleccionados
@@ -252,7 +233,6 @@ class _CultivoPageState extends State<CultivoPage> {
       );
       return;
     }
-
     // Resto de la validación del formulario
     if (_formKey.currentState!.validate()) {
       final firestore = FirebaseFirestore.instance;
@@ -483,7 +463,7 @@ class _CultivoPageState extends State<CultivoPage> {
                 ),
                 const Divider(height: 30),
 
-                // IDENTIFICACIÓN Y UBICACIÓN ---
+                // IDENTIFICACIÓN Y UBICACIÓN
                 _buildSectionHeader('1. Ubicación y Tipo de Cultivo', Icons.location_on_outlined),
                 InvernaderoSelector(
                   data: invernaderoData,
@@ -526,7 +506,7 @@ class _CultivoPageState extends State<CultivoPage> {
                   keyboardType: TextInputType.number,
                 ),
                 _buildTextField(
-                  label: 'Densidad de Siembra (plantas/m²)',
+                  label: 'Densidad de Siembra (plantas por m²)',
                   hint: 'Ej: 5 (para calcular el riesgo de propagación)',
                   onChanged: (val) => _densidadSiembra = int.tryParse(val),
                   icon: Icons.grid_on_outlined,
@@ -553,15 +533,13 @@ class _CultivoPageState extends State<CultivoPage> {
                 ),
                 _buildTextField(
                   label: 'Última Aplicación de Fertilizante',
-                  hint: 'Ej: NPK 15-30-15 (hace 7 días)',
+                  hint: 'Ej: 15-30-25 (hace 7 días)',
                   onChanged: (val) => _fertilizante = val,
                   icon: Icons.compost,
                   keyboardType: TextInputType.multiline,
                   isRequired: false,
                 ),
-
                 const SizedBox(height: 30),
-
                 // BOTÓN DE GUARDAR
                 ElevatedButton.icon(
                   onPressed: _saveCultivo,

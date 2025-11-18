@@ -3,8 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:invernadero/Pages/SideNav.dart';
 
-// Definición de colores
 const Color primaryGreen = Color(0xFF2E7D32);
 const Color accentBlue = Color(0xFF42A5F5);
 const Color backgroundColor = Color(0xFFF8F5ED);
@@ -26,22 +26,14 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
   @override
   void initState() {
     super.initState();
-    // No se llama a ninguna función de carga en initState,
-    // ya que no tenemos acceso al contexto de la ruta todavía.
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-
-    // didChangeDependencies se ejecuta DESPUÉS de initState y tiene acceso al contexto (ModalRoute).
     if (_isLoading) {
-      // 1. INTENTAR OBTENER EL ID DE LOS ARGUMENTOS DE NAVEGACIÓN
-      // Esto es lo que se pasa desde el botón 'Visitar' en Gestioninvernadero
       final String? idFromArgs = ModalRoute.of(context)?.settings.arguments as String?;
-
       if (idFromArgs != null && idFromArgs.isNotEmpty) {
-        // ID encontrado en los argumentos, se utiliza inmediatamente.
         _invernaderoId = idFromArgs;
         if (mounted) {
           setState(() {
@@ -49,21 +41,18 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
           });
         }
       } else {
-        // 2. FALLBACK: Si no hay argumentos, buscar el ID en el perfil del usuario.
-        // Esto cubre casos de navegación directa o enlaces dinámicos.
         _fallbackLoadInvernaderoId();
       }
     }
   }
 
-  // Fallback: Carga el ID del invernadero asociado al usuario actual (si no se pasó como argumento).
+  // Funcion Carga el ID del invernadero asociado al usuario actual.
   Future<void> _fallbackLoadInvernaderoId() async {
     final user = _auth.currentUser;
     if (user == null) {
       if(mounted) setState(() { _isLoading = false; });
       return;
     }
-
     try {
       // Intentar obtener el ID si el usuario es un empleado
       final userDoc = await _firestore.collection('usuarios').doc(user.uid).get();
@@ -74,13 +63,12 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
         if (idFromUser != null) {
           _invernaderoId = idFromUser;
         } else {
-          // Intentar obtener el ID si el usuario es el dueño (ownerId)
+          // Intentar obtener el ID si el usuario es el dueño
           final ownerSnapshot = await _firestore
               .collection('invernaderos')
               .where('ownerId', isEqualTo: user.uid)
               .limit(1)
               .get();
-
           if (ownerSnapshot.docs.isNotEmpty) {
             _invernaderoId = ownerSnapshot.docs.first.id;
           }
@@ -94,12 +82,9 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
       }
     }
   }
-
-  // Genera el Stream de empleados (rol: 'empleado') para el invernadero.
   // Esta es la "función que funciona" para obtener la lista de forma continua.
   Stream<QuerySnapshot>? _getEmpleadosStream() {
     if (_invernaderoId == null) return null;
-
     return _firestore
         .collection('usuarios')
         .where('invernaderoId', isEqualTo: _invernaderoId)
@@ -107,7 +92,7 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
         .snapshots(); // <- Usa snapshots() para la actualización en tiempo real
   }
 
-  // Muestra un mensaje temporal (SnackBar)
+  // Muestra un mensaje temporal
   void _showSnackBar(String message, IconData icon, Color color) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -128,9 +113,8 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
     );
   }
 
-  // --- RF: ASIGNAR (Invitar Empleado) ---
-
-  // Widget para mostrar el código de invitación de forma destacada
+  //ASIGNAR (Invitar Empleado)
+  // Widget para mostrar el código de invitación
   Widget _buildCodeDisplay(String code) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -240,8 +224,6 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
     );
   }
 
-  // --- RF: MODIFICAR (Editar Nombre) ---
-
   Future<void> _showEditDialog(DocumentSnapshot empleado) async {
     final empId = empleado.id;
     final nombreController = TextEditingController(text: empleado['nombre'] ?? '');
@@ -301,7 +283,7 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
     }
   }
 
-  // --- RF: ELIMINAR (Revocar Acceso) ---
+  // ELIMINAR (Revocar Acceso)
 
   Future<void> _deleteEmpleado(String userId) async {
     final confirm = await showDialog<bool>(
@@ -310,7 +292,7 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Revocar Acceso'),
         content: const Text(
-            '¿Seguro que deseas ELIMINAR a este empleado de tu invernadero? Esto revoca su acceso a todos los datos, pero no elimina su cuenta de usuario.'),
+            '¿Seguro que deseas ELIMINAR a este empleado de tu invernadero? Esto revoca su acceso a todos los datos.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
           ElevatedButton(
@@ -321,7 +303,6 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
         ],
       ),
     );
-
     if (confirm == true) {
       await _firestore.collection('usuarios').doc(userId).update({
         'invernaderoId': FieldValue.delete(),
@@ -357,7 +338,7 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
                   ),
                 ),
               ),
-              // Opción de Modificar (RF Cumplido: Solo nombre)
+              // Opción de Modificar
               ListTile(
                 leading: const Icon(Icons.edit_rounded, color: accentBlue),
                 title: Text('Editar Nombre de $empNombre'),
@@ -366,7 +347,7 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
                   _showEditDialog(empleado);
                 },
               ),
-              // Opción de Eliminar (RF Cumplido: Revocar acceso)
+              // Opción de Eliminar
               ListTile(
                 leading: const Icon(Icons.person_remove_rounded, color: Colors.redAccent),
                 title: Text('Revocar Acceso de $empNombre'),
@@ -381,7 +362,6 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
       ),
     );
   }
-  // --------------------------------------------------------------------
 
 
   @override
@@ -422,9 +402,17 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
 
     return Scaffold(
       backgroundColor: backgroundColor,
+      drawer: Drawer(child: SideNav(currentRoute: 'empleado')),
       appBar: AppBar(
-        title: const Text('Gestión de Empleados', style: TextStyle(color: Colors.white)),
         backgroundColor: primaryGreen,
+        elevation: 0,
+        centerTitle: true,
+        iconTheme: const IconThemeData(color: Colors.white),
+        title: const Text(
+          "Gestion Empleados",
+          style: TextStyle(
+              color: Colors.white, fontWeight: FontWeight.bold, fontSize: 19),
+        ),
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: _getEmpleadosStream(),
@@ -515,7 +503,7 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
   }
 }
 
-// Clases de navegación dummy mantenidas.
+// Clases de navegación.
 
 class DetalleEmpleadoPage extends StatelessWidget {
   final DocumentSnapshot empleado;
