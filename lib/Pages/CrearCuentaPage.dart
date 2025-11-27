@@ -6,7 +6,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class CrearCuentaPage extends StatefulWidget {
   final String? invernaderoIdToJoin;
-  const CrearCuentaPage({super.key, this.invernaderoIdToJoin});
+  final String appId;
+
+  const CrearCuentaPage({
+    super.key,
+    this.invernaderoIdToJoin,
+    required this.appId,
+  });
 
   @override
   State<CrearCuentaPage> createState() => _CrearCuentaPageState();
@@ -35,6 +41,11 @@ class _CrearCuentaPageState extends State<CrearCuentaPage>
   static const Color bgLight = Color(0xFFF7F9F7);
 
   @override
+  void initState() {
+    super.initState();
+  }
+
+  @override
   void dispose() {
     nameCtrl.dispose();
     emailCtrl.dispose();
@@ -46,33 +57,46 @@ class _CrearCuentaPageState extends State<CrearCuentaPage>
     super.dispose();
   }
 
+  // Implementación de la ruta segmentada >>>>
   Future<void> _register() async {
     if (!_formKey.currentState!.validate()) return;
     isLoading.value = true;
 
     try {
-      // Crea el usuario con email y contraseña
+      // Crea el usuario con email y contraseña (Autenticación)
       final userCred = await _auth.createUserWithEmailAndPassword(
         email: emailCtrl.text.trim(),
         password: passCtrl.text.trim(),
       );
 
-      // Si es exitoso, envía la verificación y guarda el perfil en Firestore
+      final userUid = userCred.user!.uid;
+
+      // Definir la referencia del documento de usuario con la ruta segmentada correcta
+      final userDocRef = _firestore
+          .collection('artifacts')
+          .doc(widget.appId)
+          .collection('public')
+          .doc('data')
+          .collection('usuarios')
+          .doc(userUid);
+
+      // Envía la verificación y guarda el perfil en Firestore
       await Future.wait([
         userCred.user!.sendEmailVerification(),
-        _firestore.collection('usuarios').doc(userCred.user!.uid).set({
+        userDocRef.set({ 
           'nombre': nameCtrl.text.trim(),
           'email': emailCtrl.text.trim(),
-          'uid': userCred.user!.uid,
+          'uid': userUid,
           'fechaRegistro': Timestamp.now(),
           'rol': widget.invernaderoIdToJoin != null ? 'empleado' : 'pendiente',
           'invernaderoId': widget.invernaderoIdToJoin ?? '',
         }),
       ]);
+
       if (widget.invernaderoIdToJoin != null) {
         final prefs = await SharedPreferences.getInstance();
         await prefs.remove('pendingInvernaderoId');
-        debugPrint('🔗 ID de invernadero pendiente borrada de SharedPreferences.');
+        debugPrint(' ID de invernadero pendiente borrada de SharedPreferences.');
       }
       if (!mounted) return;
       await Future.delayed(const Duration(milliseconds: 500));
@@ -86,11 +110,13 @@ class _CrearCuentaPageState extends State<CrearCuentaPage>
       );
       await Future.delayed(const Duration(seconds: 2));
       if (mounted) {
+        // Navegación a la página de selección de rol con el appId 
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
             builder: (_) => SeleccionRol(
               invernaderoIdFromLink: widget.invernaderoIdToJoin,
+              appId: widget.appId,
             ),
           ),
         );
@@ -101,7 +127,7 @@ class _CrearCuentaPageState extends State<CrearCuentaPage>
         msg = 'Este correo ya está registrado.';
       } else if (e.code == 'weak-password') {
         msg = 'La contraseña es muy débil.';
-      } else if (e.code == 'invalid-email') { // Agregamos manejo explícito del error de formato
+      } else if (e.code == 'invalid-email') {
         msg = 'El formato del correo electrónico es incorrecto.';
       }
       ScaffoldMessenger.of(context).showSnackBar(
@@ -220,7 +246,7 @@ class _CrearCuentaPageState extends State<CrearCuentaPage>
                                     if (v == null || v.isEmpty) {
                                       return 'Correo electrónico obligatorio';
                                     }
-                                    // Validación de correo robusta
+                                    // Validación de correo 
                                     const pattern = r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$';
                                     final regExp = RegExp(pattern);
                                     if (!regExp.hasMatch(v.trim())) {
@@ -306,7 +332,6 @@ class _CrearCuentaPageState extends State<CrearCuentaPage>
                           ),
                         ),
                         const SizedBox(height: 20),
-                        // Texto de retorno al login
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [

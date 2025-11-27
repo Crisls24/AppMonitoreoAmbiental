@@ -24,11 +24,14 @@ enum SensorStatus { ok, advertencia, anomalia, critico, sinDatos }
 class SensorPage extends StatefulWidget {
   final String rtdbPath;
   final String? invernaderoId;
+  final String appId;
+
 
   const SensorPage({
     super.key,
     required this.rtdbPath,
     this.invernaderoId,
+    required this.appId, 
   });
 
   @override
@@ -36,6 +39,7 @@ class SensorPage extends StatefulWidget {
 }
 
 class _SensorPageState extends State<SensorPage> {
+
   late DatabaseReference _rootRef;
   late Stream<DatabaseEvent> _stream;
   final String _supportPhoneNumber = "+527711509246";
@@ -133,7 +137,7 @@ class _SensorPageState extends State<SensorPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: backgroundColor,
-      drawer: Drawer(child: SideNav(currentRoute: 'sensor')),
+      drawer: Drawer(child: SideNav(currentRoute: 'sensor', appId: widget.appId)),
       appBar: AppBar(
         title: const Text(
           "Monitoreo de Sensores",
@@ -691,7 +695,7 @@ class SensorCard extends StatelessWidget {
   }
 }
 
-// PÁGINA: REGISTRO Y SUGERENCIA DE MANTENIMIENTO
+//  REGISTRO Y SUGERENCIA DE MANTENIMIENTO
 class MaintenanceLogPage extends StatefulWidget {
   final String invernaderoId;
   final String sensorId;
@@ -1016,7 +1020,6 @@ class _MaintenanceLogPageState extends State<MaintenanceLogPage> {
                 )
             ),
             const SizedBox(height: 30),
-
             // Botón de Guardar
             SizedBox(
               width: double.infinity,

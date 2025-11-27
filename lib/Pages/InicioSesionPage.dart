@@ -9,15 +9,19 @@ import 'package:invernadero/Pages/HomePage.dart';
 
 class InicioSesion extends StatefulWidget {
   final String? invernaderoIdToJoin; // ID recibido desde el link de invitación
+  final String appId; 
 
-  const InicioSesion({super.key, this.invernaderoIdToJoin});
+  const InicioSesion({
+    super.key,
+    this.invernaderoIdToJoin,
+    required this.appId,
+  });
 
   @override
   State<InicioSesion> createState() => _InicioSesionState();
 }
 
 class _InicioSesionState extends State<InicioSesion> {
-  //  Clave para el formulario
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -27,8 +31,7 @@ class _InicioSesionState extends State<InicioSesion> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final GoogleSignIn _googleSignIn = GoogleSignIn();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
-  String? _pendingInvernadero; // ID temporal leído de SharedPreferences
+  String? _pendingInvernadero; 
 
   @override
   void initState() {
@@ -36,9 +39,19 @@ class _InicioSesionState extends State<InicioSesion> {
     _loadPendingInvernadero();
   }
 
+  /// Devuelve la referencia completa al documento de perfil del usuario.
+  DocumentReference<Map<String, dynamic>> _getUserProfileRef(String uid) {
+    return _firestore
+        .collection('artifacts')
+        .doc(widget.appId)
+        .collection('public')
+        .doc('data')
+        .collection('usuarios') 
+        .doc(uid);
+  }
+
   Future<void> _loadPendingInvernadero() async {
     final prefs = await SharedPreferences.getInstance();
-    // NOTA: El main.dart usa 'pendingInvernaderoId', ajustado a ese key.
     final saved = prefs.getString('pendingInvernaderoId');
     setState(() {
       _pendingInvernadero = saved;
@@ -56,7 +69,7 @@ class _InicioSesionState extends State<InicioSesion> {
     super.dispose();
   }
 
-  // 🔹 Iniciar sesión con email y contraseña
+  // Iniciar sesión con email y contraseña
   Future<void> _loginUser() async {
     if (!_formKey.currentState!.validate()) {
       debugPrint(' Validación fallida: Campos vacíos detectados.');
@@ -121,7 +134,7 @@ class _InicioSesionState extends State<InicioSesion> {
       if (user != null) {
         final prefs = await SharedPreferences.getInstance();
         final savedInvernadero = widget.invernaderoIdToJoin ?? _pendingInvernadero;
-        final userRef = _firestore.collection('usuarios').doc(user.uid);
+        final userRef = _getUserProfileRef(user.uid);
         final doc = await userRef.get();
 
         // Si es nuevo usuario, lo creamos
@@ -152,13 +165,11 @@ class _InicioSesionState extends State<InicioSesion> {
       if (mounted) _loadingNotifier.value = false;
     }
   }
-
   // Decide a dónde redirigir después del login
   Future<void> _navigateAfterLogin(User user) async {
-    final docRef = _firestore.collection('usuarios').doc(user.uid);
+    final docRef = _getUserProfileRef(user.uid);
     final doc = await docRef.get();
     final data = doc.data() ?? {};
-
     // Limpieza de caché de invitación pendiente al iniciar sesión
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('pendingInvernaderoId');
@@ -175,13 +186,18 @@ class _InicioSesionState extends State<InicioSesion> {
     debugPrint(' LOGIN_NAV → rol=$normalizedRol, invernaderoExistente=$invernaderoIdExistente');
     debugPrint(' LOGIN_NAV → invernaderoToJoin=$invernaderoToJoin');
 
-    //  Si vino desde link de invitación (prioridad alta)
+    // Si vino desde link de invitación (prioridad alta)
     if (invernaderoToJoin != null && invernaderoToJoin.isNotEmpty) {
       debugPrint('📩 Usuario vino desde link ($invernaderoToJoin)');
 
       // Si ya tiene el rol y es del mismo invernadero, va a Home
       if (normalizedRol == 'empleado' && invernaderoIdExistente == invernaderoToJoin) {
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => HomePage()));
+        Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+                builder: (_) => HomePage(appId: widget.appId)
+            )
+        );
         return;
       }
 
@@ -190,7 +206,10 @@ class _InicioSesionState extends State<InicioSesion> {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (_) => SeleccionRol(invernaderoIdFromLink: invernaderoToJoin),
+            builder: (_) => SeleccionRol(
+              invernaderoIdFromLink: invernaderoToJoin,
+              appId: widget.appId,
+            ),
           ),
         );
         return;
@@ -198,20 +217,35 @@ class _InicioSesionState extends State<InicioSesion> {
 
       // Si es dueño (siempre tiene prioridad), va a Gestión
       if (normalizedRol == 'dueño') {
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => Gestioninvernadero()));
+        Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+                builder: (_) => Gestioninvernadero(appId: widget.appId)
+            )
+        );
         return;
       }
     }
 
-    // 🔹 Flujo normal (sin link)
+    // Flujo normal (sin link)
     if (normalizedRol.isEmpty || normalizedRol == 'pendiente') {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const SeleccionRol()));
+      Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+              builder: (_) => SeleccionRol(appId: widget.appId)
+          )
+      );
       return;
     }
 
     if (normalizedRol == 'dueño') {
       if (invernaderoIdExistente.isNotEmpty) {
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => Gestioninvernadero()));
+        Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+                builder: (_) => Gestioninvernadero(appId: widget.appId)
+            )
+        );
       } else {
         Navigator.pushReplacementNamed(context, '/registrarinvernadero');
       }
@@ -219,12 +253,20 @@ class _InicioSesionState extends State<InicioSesion> {
     }
 
     if (normalizedRol == 'empleado') {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => HomePage()));
+      Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+              builder: (_) => HomePage(appId: widget.appId)
+          )
+      );
       return;
     }
-
-    // Rol desconocido → va a selección
-    Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const SeleccionRol()));
+    Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+            builder: (_) => SeleccionRol(appId: widget.appId)
+        )
+    );
   }
 
   @override
@@ -245,7 +287,6 @@ class _InicioSesionState extends State<InicioSesion> {
               ),
             ),
           ),
-
           // Contenido principal
           Align(
             alignment: Alignment.center,
@@ -305,7 +346,6 @@ class _InicioSesionState extends State<InicioSesion> {
                         style: TextStyle(fontSize: 14, color: Colors.black54),
                       ),
                       const SizedBox(height: 30),
-
                       // Email (TextFormField con validación)
                       TextFormField(
                         controller: _emailController,
@@ -320,13 +360,12 @@ class _InicioSesionState extends State<InicioSesion> {
                         ),
                         validator: (value) {
                           if (value == null || value.isEmpty) {
-                            return 'Por favor, ingresa tu correo electrónico.'; // Mensaje de error
+                            return 'Por favor, ingresa tu correo electrónico.'; 
                           }
                           return null;
                         },
                       ),
                       const SizedBox(height: 20),
-
                       // Contraseña (TextFormField con validación)
                       TextFormField(
                         controller: _passwordController,
@@ -348,13 +387,12 @@ class _InicioSesionState extends State<InicioSesion> {
                         ),
                         validator: (value) {
                           if (value == null || value.isEmpty) {
-                            return 'Por favor, ingresa tu contraseña.'; // Mensaje de error
+                            return 'Por favor, ingresa tu contraseña.'; 
                           }
                           return null;
                         },
                       ),
                       const SizedBox(height: 30),
-
                       // Botones
                       ValueListenableBuilder<bool>(
                         valueListenable: _loadingNotifier,
@@ -402,7 +440,6 @@ class _InicioSesionState extends State<InicioSesion> {
                           );
                         },
                       ),
-
                       const SizedBox(height: 25),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,

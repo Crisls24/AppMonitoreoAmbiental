@@ -2,9 +2,23 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:invernadero/Pages/GestionInvernadero.dart';
+
+final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+CollectionReference _getPublicCollectionRef(String appId, String collectionName) {
+  return _firestore
+      .collection('artifacts')
+      .doc(appId)
+      .collection('public')
+      .doc('data')
+      .collection(collectionName);
+}
 
 class RegistroInvernaderoPage extends StatefulWidget {
-  const RegistroInvernaderoPage({super.key});
+  final String appId;
+
+  const RegistroInvernaderoPage({super.key, required this.appId});
 
   @override
   State<RegistroInvernaderoPage> createState() => _RegistroInvernaderoPageState();
@@ -17,13 +31,22 @@ class _RegistroInvernaderoPageState extends State<RegistroInvernaderoPage> {
   final _superficieController = TextEditingController();
   final ValueNotifier<bool> _loadingNotifier = ValueNotifier(false);
 
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final User? currentUser = FirebaseAuth.instance.currentUser;
 
-  static const Color primaryGreen = Color(0xFF2E7D32); // Verde oscuro primario
-  static const Color softGreen = Color(0xFF81C784); // Verde suave para acentos
-  static const Color backgroundLight = Color(0xFFF7F9F7); // Fondo muy claro
-  static const Color inputFillColor = Color(0xFFE8EEF4); // Gris azulado muy claro
+  late final CollectionReference _invernaderosCollectionRef;
+  late final CollectionReference _usuariosCollectionRef;
+
+  static const Color primaryGreen = Color(0xFF2E7D32);
+  static const Color softGreen = Color(0xFF81C784);
+  static const Color backgroundLight = Color(0xFFF7F9F7);
+  static const Color inputFillColor = Color(0xFFE8EEF4);
+
+  @override
+  void initState() {
+    super.initState();
+    _invernaderosCollectionRef = _getPublicCollectionRef(widget.appId, 'invernaderos');
+    _usuariosCollectionRef = _getPublicCollectionRef(widget.appId, 'usuarios');
+  }
 
   @override
   void dispose() {
@@ -70,8 +93,7 @@ class _RegistroInvernaderoPageState extends State<RegistroInvernaderoPage> {
       final superficieM2 = double.tryParse(_superficieController.text.trim()) ?? 0.0;
       final userId = currentUser!.uid;
 
-      // Crear el invernadero
-      final docRef = await _firestore.collection('invernaderos').add({
+      final docRef = await _invernaderosCollectionRef.add({
         'nombre': nombre,
         'ubicacion': ubicacion,
         'superficie_m2': superficieM2,
@@ -81,19 +103,24 @@ class _RegistroInvernaderoPageState extends State<RegistroInvernaderoPage> {
       });
 
       final invernaderoId = docRef.id;
-      // Actualizar al usuario con su nuevo invernadero y rol
-      await _firestore.collection('usuarios').doc(userId).set({
+
+      // ACTUALIZAR ROL DEL USUARIO 
+      await _usuariosCollectionRef.doc(userId).set({
         'rol': 'dueño',
         'invernaderoId': invernaderoId,
         'roleStatus': 'complete',
       }, SetOptions(merge: true));
+
       _showSnackBar(
         'Invernadero "$nombre" registrado con éxito.',
         Icons.check_circle,
         softGreen,
       );
       if (mounted) {
-        Navigator.pop(context); // Regresa a Gestioninvernadero
+        // Navegación
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => Gestioninvernadero(appId: widget.appId)),
+        );
       }
     } on FirebaseException catch (e) {
       _showSnackBar('Error de Firebase: ${e.message}', Icons.error, Colors.red);
@@ -112,9 +139,7 @@ class _RegistroInvernaderoPageState extends State<RegistroInvernaderoPage> {
     return InputDecoration(
       labelText: labelText,
       hintText: hintText,
-
       labelStyle: const TextStyle(color: Colors.black54),
-      //  Etiqueta flotante Verde
       floatingLabelStyle: const TextStyle(color: primaryGreen, fontWeight: FontWeight.bold),
       prefixIcon: Icon(icon, color: primaryGreen.withOpacity(0.7)),
       filled: true,
@@ -123,7 +148,6 @@ class _RegistroInvernaderoPageState extends State<RegistroInvernaderoPage> {
         borderRadius: BorderRadius.circular(12),
         borderSide: BorderSide.none,
       ),
-
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: primaryGreen, width: 2.5),
@@ -143,19 +167,18 @@ class _RegistroInvernaderoPageState extends State<RegistroInvernaderoPage> {
     return null;
   }
 
-  // OPTIMIZACIÓN: Separamos los widgets estáticos
   Widget _buildHeader() {
     return Column(
-      children: const [
-        Center(
+      children: [
+        const Center(
           child: Icon(
             Icons.grass_outlined,
             color: primaryGreen,
             size: 60,
           ),
         ),
-        SizedBox(height: 20),
-        Text(
+        const SizedBox(height: 20),
+        const Text(
           'Configura tu Invernadero',
           textAlign: TextAlign.center,
           style: TextStyle(
@@ -164,13 +187,13 @@ class _RegistroInvernaderoPageState extends State<RegistroInvernaderoPage> {
             color: primaryGreen,
           ),
         ),
-        SizedBox(height: 8),
-        Text(
+        const SizedBox(height: 8),
+        const Text(
           'Ingresa los datos esenciales para comenzar a monitorear.',
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 15, color: Colors.black54, height: 1.4),
         ),
-        SizedBox(height: 40),
+        const SizedBox(height: 40),
       ],
     );
   }
@@ -227,7 +250,6 @@ class _RegistroInvernaderoPageState extends State<RegistroInvernaderoPage> {
             ),
           ),
           const SizedBox(height: 50),
-          // OPTIMIZACIÓN: ValueListenableBuilder para aislar el estado del botón
           ValueListenableBuilder<bool>(
             valueListenable: _loadingNotifier,
             builder: (context, isLoading, child) {
@@ -261,7 +283,6 @@ class _RegistroInvernaderoPageState extends State<RegistroInvernaderoPage> {
         ],
       ),
     );
-    // Usamos el Scaffold con AppBar para el manejo de navegación estándar.
     return Scaffold(
       backgroundColor: backgroundLight,
       appBar: AppBar(

@@ -6,9 +6,10 @@ import 'package:invernadero/Pages/RegistroInvernadero.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:invernadero/Pages/SideNav.dart';
 
-
 class Gestioninvernadero extends StatefulWidget {
-  const Gestioninvernadero({super.key});
+  final String appId;
+
+  const Gestioninvernadero({super.key, required this.appId});
 
   @override
   State<Gestioninvernadero> createState() => _GestioninvernaderoState();
@@ -23,6 +24,29 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
   static const Color accentBlue = Color(0xFF42A5F5);
 
   String searchQuery = '';
+
+  // FUNCIÓN AUXILIAR DE RUTA 
+  
+  CollectionReference<Map<String, dynamic>> _getPublicCollectionRef(
+      String collectionName) {
+    return _firestore
+        .collection('artifacts')
+        .doc(widget.appId)
+        .collection('public')
+        .doc('data')
+        .collection(collectionName);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   void _showSnackBar(String message, IconData icon, Color color) {
     if (!mounted) return;
@@ -44,8 +68,33 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
     );
   }
 
+  //  Rutas en _setAndNavigateToHome 
+  Future<void> _setAndNavigateToHome(String invernaderoId) async {
+    if (currentUser == null) {
+      _showSnackBar('Debe iniciar sesión para realizar esta acción.', Icons.lock, Colors.red);
+      return;
+    }
+
+    try {
+      await _getPublicCollectionRef('usuarios').doc(currentUser!.uid).set({
+        'invernaderoId': invernaderoId, 
+      }, SetOptions(merge: true));
+
+      //  Navegar a la página principal usando la ruta con nombre.
+      if (mounted) {
+        Navigator.pushReplacementNamed(
+          context,
+          '/home',
+        );
+      }
+    } catch (e) {
+      debugPrint('Error al actualizar el invernadero activo: $e');
+      _showSnackBar('Error al visitar el invernadero.', Icons.error, Colors.redAccent);
+    }
+  }
+
   void _showShareDialog(String invernaderoId, String nombreInvernadero) {
-    final enlace = 'https://biosensorapp.page.link/invitar?invernadero=$invernaderoId';
+    final enlace = 'https://biosensorapp.page.link/invitar?appId=${widget.appId}&invernadero=$invernaderoId';
 
     showDialog(
       context: context,
@@ -62,10 +111,6 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
                   fontWeight: FontWeight.bold, fontSize: 18, color: accentBlue),
             ),
           ],
-        ),
-        content: const Text(
-          'Comparte este enlace con tu colaborador para que se pueda unir a tu invernadero.',
-          style: TextStyle(fontSize: 15),
         ),
         actions: [
           TextButton(
@@ -105,6 +150,7 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
     );
   }
 
+  // CORRECCIÓN CRÍTICA 3: Rutas en _deleteInvernadero 
   Future<void> _deleteInvernadero(String id) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -125,8 +171,19 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
     );
 
     if (confirm == true) {
-      await _firestore.collection('invernaderos').doc(id).delete();
+      // Eliminar el invernadero
+      await _getPublicCollectionRef('invernaderos').doc(id).delete();
       _showSnackBar('Invernadero eliminado correctamente', Icons.delete_forever, Colors.redAccent);
+      // Comprobar y actualizar el perfil del usuario si era el invernadero activo
+      if (currentUser?.uid != null) {
+        final userDoc = await _getPublicCollectionRef('usuarios').doc(currentUser!.uid).get();
+        final currentActiveId = userDoc.data()?['invernaderoId'];
+        if (currentActiveId == id) {
+          await _getPublicCollectionRef('usuarios').doc(currentUser!.uid).update({
+            'invernaderoId': '', 
+          });
+        }
+      }
     }
   }
 
@@ -174,13 +231,16 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
       ),
     );
   }
+
+  // Rutas en _showCollaboratorsDialog 
   void _showCollaboratorsDialog(String invernaderoId, String nombreInvernadero) async {
-    final snapshot = await _firestore
-        .collection('usuarios')
+
+    final snapshot = await _getPublicCollectionRef('usuarios')
         .where('invernaderoId', isEqualTo: invernaderoId)
         .where('rol', isEqualTo: 'empleado')
         .get();
     final colaboradores = snapshot.docs;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -189,7 +249,12 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
       ),
       builder: (context) {
         return Padding(
-          padding: const EdgeInsets.all(16.0),
+          padding: EdgeInsets.only(
+            top: 16.0,
+            left: 16.0,
+            right: 16.0,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 16.0,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -235,8 +300,7 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
                     IconButton(
                       icon: const Icon(Icons.share_rounded, color: primaryGreen),
                       onPressed: () {
-                        final enlace = 'https://crisls24.github.io/biosensor-links/?invernadero=$invernaderoId';
-                        final mensaje = '🌿 Únete a mi invernadero "$nombreInvernadero" con este enlace:\n$enlace';
+                        final mensaje = '🌿 Únete a mi invernadero "$nombreInvernadero" con el código: $invernaderoId';
                         Share.share(mensaje, subject: 'Invitación BioSensor');
                       },
                     ),
@@ -272,10 +336,13 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
                       trailing: IconButton(
                         icon: const Icon(Icons.remove_circle_outline, color: Colors.redAccent),
                         onPressed: () async {
-                          // Implementar un diálogo de confirmación antes de eliminar el colaborador
-                          await _firestore.collection('usuarios').doc(colaboradores[i].id).delete();
+                          final colabId = colaboradores[i].id;
+                          await _getPublicCollectionRef('usuarios').doc(colabId).update({
+                            'invernaderoId': '', 
+                            'rol': 'pendiente',
+                          });
                           Navigator.pop(context);
-                          _showSnackBar('Colaborador eliminado', Icons.person_remove, Colors.redAccent);
+                          _showSnackBar('Colaborador desvinculado', Icons.person_remove, Colors.redAccent);
                         },
                       ),
                     );
@@ -291,7 +358,7 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
 
   Widget _buildInvernaderoCard(Map<String, dynamic> data) {
     final nombre = data['nombre'] ?? 'Invernadero sin nombre';
-    final id = data['id'] ?? 'ID no disponible';
+    final id = data['id'] ?? 'ID no disponible'; 
     final ubicacion = data['ubicacion'] ?? 'Ubicación no registrada';
 
     return Card(
@@ -311,6 +378,14 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
                   height: 160,
                   width: double.infinity,
                   fit: BoxFit.cover,
+                  // Fallback para entornos sin assets
+                  errorBuilder: (context, error, stackTrace) => Container(
+                    height: 160,
+                    width: double.infinity,
+                    color: Colors.lightGreen.shade200,
+                    alignment: Alignment.center,
+                    child: const Text('🏡\n(Placeholder)', textAlign: TextAlign.center, style: TextStyle(fontSize: 30)),
+                  ),
                 ),
               ),
               Positioned(
@@ -370,13 +445,10 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
                             borderRadius: BorderRadius.circular(10)),
                       ),
                     ),
-                    const SizedBox(width: 8), // Espacio entre botones
+                    const SizedBox(width: 8), 
                     // Botón Visitar
                     ElevatedButton.icon(
-                      onPressed: () {
-                        // Navega a la página de inicio
-                        Navigator.pushNamed(context, '/home');
-                      },
+                      onPressed: () => _setAndNavigateToHome(id),
                       icon: const Icon(Icons.open_in_new_rounded, size: 20),
                       label: const Text('Visitar'),
                       style: ElevatedButton.styleFrom(
@@ -403,7 +475,7 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
     }
 
     return Scaffold(
-      drawer: Drawer(child: SideNav(currentRoute: 'gestion')),
+      drawer: Drawer(child: SideNav(currentRoute: 'gestion', appId: widget.appId)),
       appBar: AppBar(
         title: const Text(
           'Mis Invernaderos',
@@ -435,8 +507,7 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
           ),
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
-              stream: _firestore
-                  .collection('invernaderos')
+              stream: _getPublicCollectionRef('invernaderos')
                   .where('ownerId', isEqualTo: currentUser!.uid)
                   .snapshots(),
               builder: (context, snapshot) {
@@ -463,9 +534,7 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
                     ),
                   );
                 }
-
                 return ListView.builder(
-                  // Añadimos padding inferior aquí para dar espacio al FloatingActionButton
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
                   itemCount: filtrados.length,
                   itemBuilder: (context, i) {
@@ -486,7 +555,7 @@ class _GestioninvernaderoState extends State<Gestioninvernadero> {
         onPressed: () {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (_) => const RegistroInvernaderoPage()),
+            MaterialPageRoute(builder: (_) => RegistroInvernaderoPage(appId: widget.appId)),
           );
         },
         backgroundColor: primaryGreen,

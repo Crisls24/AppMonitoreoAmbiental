@@ -2,10 +2,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:invernadero/Pages/CosechasPage.dart';
 import 'package:invernadero/Pages/EmpleadosPage.dart';
 import 'package:invernadero/Pages/HomePage.dart';
-import 'package:invernadero/Pages/login.dart';
+import 'package:invernadero/Pages/InicioSesionPage.dart';
 import 'package:invernadero/Pages/ProfilePage.dart';
 import 'package:invernadero/Pages/GestionInvernadero.dart';
 import 'package:invernadero/Pages/ReportesHistoricosPage.dart';
@@ -43,7 +45,9 @@ class AppTheme {
 
 class SideNav extends StatefulWidget {
   final String currentRoute;
-  const SideNav({super.key, required this.currentRoute});
+  final String appId;
+
+  const SideNav({super.key, required this.currentRoute, required this.appId});
   @override
   State<SideNav> createState() => _SideNavState();
 }
@@ -76,7 +80,7 @@ class _SideNavState extends State<SideNav> {
       if (mounted) {
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (context) => const InicioSesion()),
+          MaterialPageRoute(builder: (context) => InicioSesion(appId: widget.appId)),
               (route) => false,
         );
       }
@@ -87,20 +91,105 @@ class _SideNavState extends State<SideNav> {
     }
   }
 
-  // FUNCIÓN DE NAVEGACIÓN SIMPLIFICADA (sin actualizar el estado interno)
+  // FUNCIÓN DE NAVEGACIÓN SIMPLE PARA PÁGINAS SIN DEPENDENCIAS
   void _navigate(BuildContext context, Widget page) {
-    Navigator.pop(context); // Cierra el drawer
+    Navigator.pop(context); 
+
     if (page is HomePage) {
+      // Navegación con reemplazo para HomePage
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (context) => page),
+        MaterialPageRoute(builder: (context) => HomePage(appId: widget.appId)),
             (route) => false,
       );
+    } else if (page is Gestioninvernadero) {
+      // Navegación normal para Gestioninvernadero
+      Navigator.push(context, MaterialPageRoute(builder: (context) => Gestioninvernadero(appId: widget.appId)));
+    } else if (page is ProfilePage) {
+      // Navegación normal para ProfilePage
+      Navigator.push(context, MaterialPageRoute(builder: (context) => ProfilePage(appId: widget.appId)));
+    } else if (page is ReportesHistoricosPage) {
+      // ReportesHistoricosPage necesita appId
+      Navigator.push(context, MaterialPageRoute(builder: (context) => ReportesHistoricosPage(appId: widget.appId)));
+    } else if (page is EmpleadosPage) {
+      // EmpleadosPage necesita appId
+      Navigator.push(context, MaterialPageRoute(builder: (context) => EmpleadosPage(appId: widget.appId)));
+    } else if (page is InicioSesion) {
+      // Navegación a Login
+      Navigator.push(context, MaterialPageRoute(builder: (context) => InicioSesion(appId: widget.appId)));
     } else {
+      // Para páginas que no hemos modificado y no necesitan appId
       Navigator.push(context, MaterialPageRoute(builder: (context) => page));
     }
   }
 
+  void _navigateToCosechas(BuildContext context) async {
+    // 1. Cierra el drawer inmediatamente para mejor UX
+    Navigator.pop(context);
+
+    final userId = _currentUser?.uid;
+
+    if (userId == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error: Debes iniciar sesión para ver las cosechas.')),
+      );
+      return;
+    }
+
+    try {
+      // BUSCAR DOCUMENTO DEL USUARIO USANDO LA RUTA REQUERIDA POR CANVAS
+      final userDocRef = FirebaseFirestore.instance
+          .collection('artifacts')
+          .doc(widget.appId)
+          .collection('public')
+          .doc('data')
+          .collection('usuarios')         .doc(userId);
+
+      print('[FirestorePath] Consultando documento de usuario en: ${userDocRef.path}');
+      final userDoc = await userDocRef.get(); 
+
+      // VERIFICACIÓN CRÍTICA DESPUÉS DEL AWAIT
+      if (!mounted) return;
+
+      final data = userDoc.data();
+
+      // Intenta obtener 'invernaderoActivo' 
+      String? invernaderoId = data?['invernaderoActivo'] as String?;
+
+      // 'invernaderoActivo' no existe o está vacío, usa 'invernaderoId' como FALLBACK
+      if (invernaderoId == null || invernaderoId.isEmpty) {
+        invernaderoId = data?['invernaderoId'] as String?;
+      }
+
+      if (invernaderoId != null && invernaderoId.isNotEmpty) {
+        print('[InvernaderoID] ID de Invernadero ACTIVO encontrado en "usuarios": $invernaderoId');
+
+        // Navegar, pasando el ID obligatorio
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => CosechasPage(
+              appId: widget.appId,
+              invernaderoId: invernaderoId!,
+            ),
+          ),
+        );
+      } else {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Advertencia: No se encontró un invernadero activo configurado para tu usuario.')
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error al cargar el invernadero: $e')),
+      );
+      print('Error en _navigateToCosechas: $e'); 
+    }
+  }
   Widget _buildMenuItem({
     required String title,
     required IconData icon,
@@ -114,17 +203,15 @@ class _SideNavState extends State<SideNav> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Container(
-        // Indicador de selección lateral (barra verde)
+        // Indicador de selección lateral 
         decoration: BoxDecoration(
           color: backgroundColor,
           borderRadius: BorderRadius.circular(8),
-          // Si está seleccionado, agregamos un borde izquierdo para simular la barra verde
           border: isSelected
               ? Border(left: BorderSide(color: AppTheme.primaryColor, width: 4))
               : null,
         ),
         child: Material(
-          // Material es necesario para InkWell
           color: Colors.transparent,
           borderRadius: BorderRadius.circular(8),
           child: InkWell(
@@ -161,15 +248,17 @@ class _SideNavState extends State<SideNav> {
     String userEmail;
     String profileImageUrl;
 
+    final defaultPlaceholder = 'https://placehold.co/44x44/${AppTheme.alternateColor.value.toRadixString(16).substring(2, 8).toUpperCase()}/616161?text=';
+
     if (isAuthenticated) {
       userName = _currentUser!.displayName ??
           (_currentUser!.email?.split('@').first ?? 'Usuario Autenticado');
       userEmail = _currentUser!.email ?? 'Email No Disponible';
-      profileImageUrl = _currentUser!.photoURL ?? 'https://placehold.co/44x44/E0E0E0/616161?text=U';
+      profileImageUrl = _currentUser!.photoURL ?? '${defaultPlaceholder}U';
     } else {
       userName = 'Usuario Invitado';
       userEmail = 'invitado@ejemplo.com';
-      profileImageUrl = 'https://placehold.co/44x44/E0E0E0/616161?text=I';
+      profileImageUrl = '${defaultPlaceholder}I';
     }
 
     return Container(
@@ -214,33 +303,40 @@ class _SideNavState extends State<SideNav> {
             title: 'Dashboard',
             icon: Icons.dashboard_rounded,
             routeId: 'home',
-            onTap: () => _navigate(context, const HomePage()),
+            onTap: () => _navigate(context, HomePage(appId: widget.appId)),
           ),
 
           _buildMenuItem(
             title: 'Invernaderos',
             icon: Icons.energy_savings_leaf,
             routeId: 'gestion',
-            onTap: () => _navigate(context, const Gestioninvernadero()),
+            onTap: () => _navigate(context, Gestioninvernadero(appId: widget.appId)),
+          ),
+
+          _buildMenuItem(
+            title: 'Cosechas',
+            icon: Icons.agriculture,
+            routeId: 'cosecha',
+            onTap: () => _navigateToCosechas(context),
           ),
 
           _buildMenuItem(
             title: 'Reportes',
             icon: Icons.document_scanner_rounded,
             routeId: 'reportes',
-            onTap: () => _navigate(context, const ReportesHistoricosPage()),
+            onTap: () => _navigate(context, ReportesHistoricosPage(appId: widget.appId)),
           ),
 
           _buildMenuItem(
             title: 'Empleados',
             icon: Icons.groups,
             routeId: 'empleado',
-            onTap: () => _navigate(context, const EmpleadosPage()),
+            onTap: () => _navigate(context, EmpleadosPage(appId: widget.appId)),
           ),
 
           _buildMenuItem(
             title: 'Sensores',
-            icon: Icons.groups,
+            icon: Icons.sensors,
             routeId: 'sensor',
             onTap: () {
               Navigator.pop(context);
@@ -257,7 +353,7 @@ class _SideNavState extends State<SideNav> {
             title: 'Perfil',
             icon: Icons.account_circle_rounded,
             routeId: 'perfil',
-            onTap: () => _navigate(context, const ProfilePage()),
+            onTap: () => _navigate(context, ProfilePage(appId: widget.appId)),
           ),
           const SizedBox(height: 50),
           Divider(
@@ -314,11 +410,13 @@ class _SideNavState extends State<SideNav> {
                           child: Material(
                             color: Colors.transparent,
                             child: InkWell(
-                              onTap: () => _navigate(context, const ProfilePage()),
+                              onTap: isAuthenticated
+                                  ? _logout
+                                  : () => _navigate(context, InicioSesion(appId: widget.appId)), 
                               child: Text(
-                                isAuthenticated ? userEmail : 'View Profile',
+                                isAuthenticated ? "Cerrar sesión" : 'Iniciar sesión',
                                 style: AppTheme.bodySmall.copyWith(
-                                    color: isAuthenticated ? AppTheme.secondaryText : AppTheme.primaryColor
+                                    color: isAuthenticated ? Colors.red : AppTheme.primaryColor
                                 ),
                                 overflow: TextOverflow.ellipsis,
                               ),

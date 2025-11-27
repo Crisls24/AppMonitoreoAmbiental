@@ -3,11 +3,17 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:invernadero/Pages/RegistroInvernadero.dart';
 import 'package:invernadero/Pages/HomePage.dart';
+import 'package:invernadero/Pages/GestionInvernadero.dart';
 
 class SeleccionRol extends StatefulWidget {
   final String? invernaderoIdFromLink;
+  final String appId;
 
-  const SeleccionRol({super.key, this.invernaderoIdFromLink});
+  const SeleccionRol({
+    super.key,
+    this.invernaderoIdFromLink,
+    required this.appId,
+  });
 
   @override
   State<SeleccionRol> createState() => _SeleccionRolState();
@@ -33,6 +39,17 @@ class _SeleccionRolState extends State<SeleccionRol>
   String? _invernaderoIdFromLink;
   bool _isJoiningFromLink = false;
 
+
+  DocumentReference<Map<String, dynamic>> _getUserProfileRef(String uid) {
+    return _firestore
+        .collection('artifacts')
+        .doc(widget.appId)
+        .collection('public')
+        .doc('data')
+        .collection('usuarios') 
+        .doc(uid);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -45,18 +62,67 @@ class _SeleccionRolState extends State<SeleccionRol>
     );
     _animController.forward();
 
-    // Capturamos el ID que viene del link
-    _invernaderoIdFromLink = widget.invernaderoIdFromLink;
+    // Iniciamos la verificación del rol antes de cualquier navegación.
+    _checkExistingRole();
+  }
 
-    if (_invernaderoIdFromLink != null && _invernaderoIdFromLink!.isNotEmpty) {
-      debugPrint('Invernadero detectado desde link: $_invernaderoIdFromLink');
-      _isJoiningFromLink = true;
-      _invernaderoIdController.text = _invernaderoIdFromLink!;
+  // VERIFICACIÓN INICIAL DE ROL 
+  void _checkExistingRole() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      // Si no hay usuario, permitimos que se muestre la UI de selección.
+      return;
+    }
 
-      // Espera un momento para mostrar animación y luego se une automáticamente
-      Future.delayed(const Duration(milliseconds: 800), () async {
-        await _unirseAInvernadero(_invernaderoIdFromLink!, fromDeepLink: true);
-      });
+    try {
+      //  Usamos la ruta CORRECTA para leer el perfil del usuario.
+      final userRef = _getUserProfileRef(user.uid);
+      final userDoc = await userRef.get();
+
+      if (userDoc.exists) {
+        final userData = userDoc.data() as Map<String, dynamic>;
+        final rol = userData['rol'];
+
+        // Si ya tiene un rol definido (no nulo y no 'pendiente'), navegamos a Home.
+        if (rol != null && rol != 'pendiente' && rol.toString().isNotEmpty) {
+          debugPrint('Rol existente detectado: $rol. Navegando a Home.');
+          if (mounted) {
+            // Navegamos según el rol
+            if (rol == 'dueño') {
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(builder: (_) => Gestioninvernadero(appId: widget.appId)),
+              );
+            } else { // Asumimos 'empleado' si no es 'dueño'
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(builder: (_) => HomePage(appId: widget.appId)),
+              );
+            }
+            return; // Detener la ejecución
+          }
+        }
+      }
+
+      // Si el rol es 'pendiente' o no existe, procedemos con la lógica de Deep Link.
+      if (widget.invernaderoIdFromLink != null && widget.invernaderoIdFromLink!.isNotEmpty) {
+        debugPrint('Invernadero detectado desde link: ${widget.invernaderoIdFromLink}');
+        setState(() {
+          _isJoiningFromLink = true;
+          _invernaderoIdController.text = widget.invernaderoIdFromLink!;
+        });
+
+        // Auto-unirse después de un pequeño retraso
+        Future.delayed(const Duration(milliseconds: 800), () async {
+          await _unirseAInvernadero(widget.invernaderoIdFromLink!, fromDeepLink: true);
+        });
+      }
+
+    } catch (e) {
+      // Si falla por cualquier error, asumimos que el usuario
+      // no ha completado el registro o es un nuevo inicio de sesión y mostramos la UI.
+      debugPrint('Error al verificar el rol inicial: $e');
+      if(mounted) setState(() {});
     }
   }
 
@@ -74,13 +140,12 @@ class _SeleccionRolState extends State<SeleccionRol>
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
-      await FirebaseFirestore.instance
-          .collection('usuarios')
-          .doc(user.uid)
-          .update({
+      final userRef = _getUserProfileRef(user.uid); 
+
+      await userRef.set({
         'rol': 'empleado',
         'invernaderoId': invernaderoId,
-      });
+      }, SetOptions(merge: true));
 
       if (mounted) {
         if (!fromDeepLink) {
@@ -88,17 +153,20 @@ class _SeleccionRolState extends State<SeleccionRol>
               Icons.check_circle, Colors.green);
         }
 
+        // Navegación a HomePage (Empleado)
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => HomePage()),
+          MaterialPageRoute(builder: (_) => HomePage(appId: widget.appId)),
         );
       }
     } catch (e) {
       debugPrint('Error al unirse al invernadero: $e');
       _showSnackBar('Error al unirse al invernadero', Icons.error, Colors.red);
-      setState(() {
-        _isJoiningFromLink = false;
-      });
+      if(mounted) {
+        setState(() {
+          _isJoiningFromLink = false;
+        });
+      }
     }
   }
 
@@ -127,9 +195,9 @@ class _SeleccionRolState extends State<SeleccionRol>
   Future<bool> _confirmExit() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
-      final doc = await _firestore.collection('usuarios').doc(user.uid).get();
+      final doc = await _getUserProfileRef(user.uid).get(); // Usa la ruta correcta
       final rol = doc.data()?['rol'];
-      if (rol == null || rol.toString().isEmpty) {
+      if (rol == null || rol.toString().isEmpty || rol == 'pendiente') {
         await FirebaseAuth.instance.signOut();
         debugPrint("Usuario salió sin elegir rol. Sesión cerrada.");
       }
@@ -194,10 +262,19 @@ class _SeleccionRolState extends State<SeleccionRol>
     try {
       debugPrint(
           "Usuario seleccionó 'Administrador', navegando a RegistroInvernaderoPage...");
+
+      // Antes de navegar, actualizamos el rol a 'pendiente' para asegurar la transición.
+      await _getUserProfileRef(currentUser!.uid).set({
+        'rol': 'pendiente',
+      }, SetOptions(merge: true));
+
       if (mounted) {
+        // La navegación es correcta, el constructor recibe el appId
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const RegistroInvernaderoPage()),
+          MaterialPageRoute(
+              builder: (_) => RegistroInvernaderoPage(appId: widget.appId)
+          ),
         );
       }
     } catch (e) {

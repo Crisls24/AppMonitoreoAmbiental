@@ -3,85 +3,90 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:invernadero/Pages/SideNav.dart';
-import 'package:invernadero/Pages/login.dart';
+import 'package:invernadero/Pages/InicioSesionPage.dart';
+import 'dart:developer';
 
 const Color primaryGreen = Color(0xFF2E7D32);
 const Color accentGreen = Color(0xFF81C784);
 const Color lightBackground = Color(0xFFF5FBEF);
 
 class ProfilePage extends StatefulWidget {
-  const ProfilePage({super.key});
+  final String appId;
+
+  const ProfilePage({super.key, required this.appId});
 
   @override
   State<ProfilePage> createState() => _ProfilePageState();
 }
 
 class _ProfilePageState extends State<ProfilePage> {
-  // Solo mantenemos en estado lo que es una carga única o variable local.
-  String _numInvernaderos = '0';
-  String _profileImageUrl = 'https://placehold.co/120x120/E0E0E0/616161?text=U';
+  String _profileImageUrl =
+      'https://placehold.co/120x120/E0E0E0/616161?text=U';
+
   User? _currentUser;
-  late Stream<DocumentSnapshot> _userStream;
+
+  late final CollectionReference<Map<String, dynamic>> usuariosRef;
+  late final CollectionReference<Map<String, dynamic>> invernaderosRef;
+
+  late Stream<DocumentSnapshot<Map<String, dynamic>>> _userStream;
 
   @override
   void initState() {
     super.initState();
     _currentUser = FirebaseAuth.instance.currentUser;
+    // RUTAS OFICIALES FIRESTORE (CollectionReference real)
+    usuariosRef = FirebaseFirestore.instance
+        .collection('artifacts')
+        .doc(widget.appId)
+        .collection('public')
+        .doc('data')
+        .collection('usuarios');
+
+    invernaderosRef = FirebaseFirestore.instance
+        .collection('artifacts')
+        .doc(widget.appId)
+        .collection('public')
+        .doc('data')
+        .collection('invernaderos');
+
     if (_currentUser == null) {
-      // Si no hay usuario, navegar inmediatamente
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _navigateToLogin();
       });
     } else {
-      // Inicializar la URL de la imagen y el Stream
       _profileImageUrl = _currentUser!.photoURL ?? _profileImageUrl;
-      _userStream = FirebaseFirestore.instance
-          .collection('usuarios')
+
+      _userStream = usuariosRef
           .doc(_currentUser!.uid)
           .snapshots();
-      _loadGreenhouseCount();
     }
   }
 
+  // REDIRECCIÓN A LOGIN
   void _navigateToLogin() {
     Navigator.pushAndRemoveUntil(
       context,
-      MaterialPageRoute(builder: (_) => const InicioSesion()),
+      MaterialPageRoute(builder: (_) => InicioSesion(appId: widget.appId)),
           (route) => false,
     );
   }
 
-  Future<void> _loadGreenhouseCount() async {
-    if (_currentUser == null) return;
-    try {
-      final invernaderosQuery = await FirebaseFirestore.instance
-          .collection('invernaderos')
-          .where('ownerId', isEqualTo: _currentUser!.uid)
-          .get();
-      int cantidadInvernaderos = invernaderosQuery.docs.length;
+  // Conteo de invernaderos del usuario
+  Stream<int> _greenhouseCountStream() {
+    if (_currentUser == null) return const Stream.empty();
 
-      if (mounted) {
-        setState(() {
-          _numInvernaderos = cantidadInvernaderos.toString();
-        });
-      }
-    } catch (e) {
-      debugPrint('Error cargando conteo de invernaderos: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error al cargar datos adicionales: $e'),
-            backgroundColor: Colors.red.shade700,
-          ),
-        );
-      }
-    }
+    return invernaderosRef
+        .where('ownerId', isEqualTo: _currentUser!.uid)
+        .snapshots()
+        .map((s) => s.docs.length);
   }
 
+  // LOGOUT
   Future<void> _logout() async {
     try {
       await FirebaseAuth.instance.signOut();
       await GoogleSignIn().signOut();
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -90,9 +95,12 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
         );
         await Future.delayed(const Duration(milliseconds: 600));
+
         _navigateToLogin();
       }
     } catch (e) {
+      log('Error al cerrar sesión: $e');
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error al cerrar sesión: $e'),
@@ -102,6 +110,7 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  // DIALOGO CONFIRMAR CIERRE DE SESIÓN
   Future<void> _confirmLogout() async {
     await showDialog(
       context: context,
@@ -118,15 +127,12 @@ class _ProfilePageState extends State<ProfilePage> {
               const Text(
                 '¿Deseas cerrar sesión?',
                 style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87),
+                    fontSize: 20, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 10),
               const Text(
                 'Tu sesión actual se cerrará y volverás al inicio de sesión.',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 15, color: Colors.black54),
               ),
               const SizedBox(height: 25),
               Row(
@@ -134,7 +140,6 @@ class _ProfilePageState extends State<ProfilePage> {
                 children: [
                   TextButton(
                     onPressed: () => Navigator.pop(context),
-                    style: TextButton.styleFrom(foregroundColor: Colors.black54),
                     child: const Text('Cancelar'),
                   ),
                   ElevatedButton(
@@ -143,12 +148,8 @@ class _ProfilePageState extends State<ProfilePage> {
                       _logout();
                     },
                     style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 18, vertical: 12),
                       backgroundColor: Colors.red.shade800,
                       foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
                     ),
                     child: const Text('Cerrar sesión'),
                   ),
@@ -161,20 +162,12 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  // Se extrae la lógica de construcción del cuerpo principal
+  // UI PRINCIPAL
   Widget _buildProfileBody(Map<String, dynamic> userData) {
-    // Valores con fallback (los mismos que tenías antes)
     final userName = userData['nombre'] ?? 'Usuario BioSensor';
     final userUsername = userData['username'] ?? userName;
     final userRole = userData['rol'] ?? 'Invitado';
     final userEmail = _currentUser?.email ?? 'No disponible';
-
-    // Asegurarse de que la URL de la imagen se actualice si cambia en la base de datos o Auth
-    String currentProfileUrl = _currentUser?.photoURL ?? _profileImageUrl;
-    if (currentProfileUrl != _profileImageUrl) {
-      _profileImageUrl = currentProfileUrl;
-    }
-
 
     return SingleChildScrollView(
       child: Column(
@@ -197,10 +190,8 @@ class _ProfilePageState extends State<ProfilePage> {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(40),
-          bottomRight: Radius.circular(40),
-        ),
+        borderRadius:
+        BorderRadius.vertical(bottom: Radius.circular(40)),
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -209,45 +200,38 @@ class _ProfilePageState extends State<ProfilePage> {
             radius: 48,
             backgroundColor: Colors.white,
             backgroundImage: NetworkImage(_profileImageUrl),
-            onBackgroundImageError: (_, __) => setState(() {
-              // Fallback local si la imagen de red falla
-              _profileImageUrl = 'assets/user_placeholder.png';
-            }),
-            child: _profileImageUrl.contains('placeholder') || _profileImageUrl.contains('assets')
-                ? const Icon(Icons.person, size: 55, color: Colors.black45)
+            child: _profileImageUrl.contains("placehold")
+                ? const Icon(Icons.person, size: 55)
                 : null,
           ),
           const SizedBox(height: 10),
-          Text(
-            name,
-            style: const TextStyle(
-                color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
-          ),
+          Text(name,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold)),
           const SizedBox(height: 5),
-          Text(
-            email,
-            style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 14),
-          ),
+          Text(email,
+              style: TextStyle(
+                  color: Colors.white.withOpacity(0.9),
+                  fontSize: 14)),
           const SizedBox(height: 8),
           Container(
-            padding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white24),
-            ),
-            child: Text(
-              role,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
-            ),
+                color: Colors.white.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(20)),
+            child: Text(role,
+                style: const TextStyle(color: Colors.white, fontSize: 13)),
           ),
         ],
       ),
     );
   }
 
-  Widget _infoContainer(String name, String username, String role, String email) {
+  // Tarjeta de Información
+  Widget _infoContainer(
+      String name, String username, String role, String email) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
       padding: const EdgeInsets.all(22),
@@ -265,14 +249,24 @@ class _ProfilePageState extends State<ProfilePage> {
       child: Column(
         children: [
           _infoRow(Icons.person_outline, "Nombre Completo", name),
-          const Divider(height: 25, color: Colors.black12),
+          const Divider(),
           _infoRow(Icons.badge_outlined, "Alias / Usuario", username),
-          const Divider(height: 25, color: Colors.black12),
+          const Divider(),
           _infoRow(Icons.work_outline, "Rol", role),
-          const Divider(height: 25, color: Colors.black12),
-          _infoRow(Icons.eco_outlined, "N° de Invernaderos Registrados",
-              _numInvernaderos), // Usa el dato de carga única
-          const Divider(height: 25, color: Colors.black12),
+          const Divider(),
+          StreamBuilder<int>(
+            stream: _greenhouseCountStream(),
+            builder: (context, snap) {
+              final count =
+                  snap.data?.toString() ??
+                      (snap.connectionState == ConnectionState.waiting
+                          ? '...'
+                          : '0');
+              return _infoRow(Icons.eco_outlined,
+                  "N° de Invernaderos Registrados", count);
+            },
+          ),
+          const Divider(),
           _infoRow(Icons.email_outlined, "Correo Electrónico", email),
         ],
       ),
@@ -285,23 +279,18 @@ class _ProfilePageState extends State<ProfilePage> {
         Icon(icon, color: primaryGreen, size: 22),
         const SizedBox(width: 15),
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label,
-                  style: const TextStyle(
-                      color: Colors.black54,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500)),
-              const SizedBox(height: 2),
-              Text(value,
-                  style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87)),
-            ],
-          ),
-        ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: const TextStyle(
+                        color: Colors.black54, fontSize: 13)),
+                Text(value,
+                    style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold)),
+              ],
+            )),
       ],
     );
   }
@@ -311,18 +300,14 @@ class _ProfilePageState extends State<ProfilePage> {
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
       child: ElevatedButton.icon(
         onPressed: _confirmLogout,
-        icon: const Icon(Icons.logout_rounded, color: Colors.white),
-        label: const Text(
-          "Cerrar Sesión",
-          style: TextStyle(
-              fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
-        ),
+        icon: const Icon(Icons.logout_rounded),
+        label: const Text("Cerrar Sesión"),
         style: ElevatedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          minimumSize: const Size(double.infinity, 50),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          foregroundColor: Colors.white,
           backgroundColor: Colors.red.shade800,
-          elevation: 5,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14)),
         ),
       ),
     );
@@ -330,67 +315,41 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
-    // Si no hay usuario, muestra un contenedor vacío
     if (_currentUser == null) {
       return const Scaffold(
-          body: Center(
-              child:
-              CircularProgressIndicator(color: primaryGreen))
-      );
+          body: Center(child: CircularProgressIndicator()));
     }
 
     return Scaffold(
       backgroundColor: lightBackground,
-      drawer: Drawer(child: SideNav(currentRoute: 'Perfil')),
+      drawer:
+      Drawer(child: SideNav(currentRoute: 'Perfil', appId: widget.appId)),
       appBar: AppBar(
         backgroundColor: primaryGreen,
         elevation: 0,
-        centerTitle: true,
-        iconTheme: const IconThemeData(color: Colors.white),
-        title: const Text(
-          "Perfil del Usuario",
-          style: TextStyle(
-              color: Colors.white, fontWeight: FontWeight.bold, fontSize: 19),
-        ),
+        title: const Text("Perfil del Usuario",
+            style: TextStyle(color: Colors.white)),
       ),
-      // Uso de StreamBuilder para la data principal del usuario
-      body: StreamBuilder<DocumentSnapshot>(
+      body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
         stream: _userStream,
         builder: (context, snapshot) {
-          // . Estado de error
           if (snapshot.hasError) {
             return Center(
-                child: Text('Error al cargar perfil: ${snapshot.error}',
-                    textAlign: TextAlign.center));
+              child: Text("Error al cargar perfil: ${snapshot.error}"),
+            );
           }
-          // 2. Estado de carga
-          if (snapshot.connectionState == ConnectionState.waiting) {
+
+          if (!snapshot.hasData || !snapshot.data!.exists) {
             return const Center(
-                child: CircularProgressIndicator(color: primaryGreen));
-          }
-          // 3. Datos listos
-          final data = snapshot.data?.data() as Map<String, dynamic>?;
-          if (data == null) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.person_off_outlined, color: Colors.red, size: 60),
-                    const SizedBox(height: 10),
-                    const Text('Error: Datos de usuario no encontrados.', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 20),
-                    ElevatedButton(
-                      onPressed: () => _navigateToLogin(),
-                      child: const Text('Volver a Iniciar Sesión'),
-                    )
-                  ],
-                ),
+              child: Text(
+                "Error: Datos de usuario no encontrados.",
+                textAlign: TextAlign.center,
               ),
             );
           }
-          return _buildProfileBody(data);
+
+          final userData = snapshot.data!.data()!;
+          return _buildProfileBody(userData);
         },
       ),
     );

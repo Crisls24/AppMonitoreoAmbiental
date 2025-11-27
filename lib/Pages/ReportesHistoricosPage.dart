@@ -6,6 +6,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:invernadero/Pages/SideNav.dart';
 
+
 const Color primaryGreen = Color(0xFF2E7D32);
 const Color secondaryGreen = Color(0xFF388E3C);
 
@@ -50,10 +51,11 @@ class UmbralesCultivo {
 }
 
 // SERVICIO SIMULADO DE DATOS
-
 class HistoricalDataService {
+  final String appId; 
   final Random _random = Random();
 
+  HistoricalDataService({required this.appId}); 
   // Función para generar puntos de datos con fluctuación y patrón diario simulado
   List<FlSpot> _generateSpots(
       String variable,
@@ -64,12 +66,10 @@ class HistoricalDataService {
       ) {
     List<FlSpot> spots = [];
 
-    // 'Día' (24 puntos) o 'Semana'/'Mes' (7 o 30 puntos)
     final isDaily = length == 24;
     final maxSamples = isDaily ? length : length;
 
     for (int i = 0; i < maxSamples; i++) {
-      // Aplicar muestreo solo para el rango "Día" (24 puntos)
       if (isDaily && (i % sampleRate != 0 && i != maxSamples - 1)) continue;
 
       double h = i.toDouble();
@@ -77,32 +77,24 @@ class HistoricalDataService {
       double value = baseValue;
 
       if (isDaily) {
-        // PATRÓN DIARIO: HORA DEL DÍA (0-23)
         int hour = i;
         double dayFactor = 0;
 
         if (variable == 'Luminosidad') {
-          // Ciclo de Luz: Cero de 22h a 6h. Pico al mediodía (12h).
           if (hour >= 6 && hour <= 18) {
-            // Horas diurnas (6am a 6pm)
-            dayFactor = sin((hour - 6) / 12 * pi); // Pico en el centro
-            // baseValue (700) determina la altura del pico. Pico ~750 lux.
+            dayFactor = sin((hour - 6) / 12 * pi);
             value = 50 + baseValue * dayFactor + randomNoise * 20;
           } else {
-            // Horas nocturnas
-            value = 1 + _random.nextDouble() * 10; // Cerca de 1-11 lux (realista para noche)
+            value = 1 + _random.nextDouble() * 10;
           }
         } else if (variable == 'Temperatura') {
-          // Ciclo de Temperatura: Mínimo en la mañana, Máximo en la tarde.
           double tempCycleFactor = cos(((hour + 10) % 24) / 24 * 2 * pi);
           value = baseValue + tempCycleFactor * fluctuationFactor * 1.5 + randomNoise;
         } else if (variable == 'Humedad') {
-          // Ciclo de Humedad: Inverso a la temperatura.
           double humCycleFactor = sin(((hour + 10) % 24) / 24 * 2 * pi);
           value = baseValue + humCycleFactor * fluctuationFactor * 0.8 + randomNoise;
         }
       } else {
-        // PATRÓN SEMANAL/MENSUAL
         double sinValue = sin((h / length) * 2 * pi);
         if (variable == 'Luminosidad') {
           value = baseValue + sinValue * fluctuationFactor + randomNoise * 10;
@@ -162,11 +154,11 @@ class HistoricalDataService {
 
   // Genera datos históricos para el periodo seleccionado
   Future<DatosHistoricos> fetchHistoricalData(String range) async {
+    
     await Future.delayed(const Duration(milliseconds: 700));
 
     final now = DateTime.now();
-    // Ajusta la longitud para 'Día' basándose en la hora actual
-    // final currentPoints = now.hour + 1;
+
     final Map<String, DatosHistoricos> mockData = {
       'Día': DatosHistoricos(
         tempPromedio: 26.5, tempMaxima: 30.5, humedadPromedio: 70.0, luminosidadPromedio: 400.0,
@@ -174,7 +166,6 @@ class HistoricalDataService {
         periodoEtiqueta: 'Hoy',
         spotsTemp: _generateSpots('Temperatura', 26.0, 4.0, 24),
         spotsHumedad: _generateSpots('Humedad', 70.0, 6.0, 24),
-        // Base de 700 para el pico (para que el máximo sea ~750 lux).
         spotsLuminosidad: _generateSpots('Luminosidad', 700.0, 200.0, 24),
         alertas: [
           AlertaEvento(tipo: 'Calor', horaInicio: now.subtract(const Duration(hours: 4)), valorPico: 30.5, duracionHoras: 1.0),
@@ -186,7 +177,6 @@ class HistoricalDataService {
         periodoEtiqueta: 'Esta Semana',
         spotsTemp: _generateSpots('Temperatura', 27.0, 3.0, 7),
         spotsHumedad: _generateSpots('Humedad', 70.0, 4.0, 7),
-        // Promedio de 380. Fluctuación de 50.
         spotsLuminosidad: _generateSpots('Luminosidad', 380.0, 50.0, 7),
         alertas: [
           AlertaEvento(tipo: 'Calor', horaInicio: DateTime(2025, 10, 8, 14, 30), valorPico: 31.8, duracionHoras: 2.5),
@@ -229,12 +219,10 @@ class _HistoricalLineChart extends StatelessWidget {
     required this.primaryColor,
   });
 
-  // Función para obtener los títulos del eje Y de forma dinámica
   Widget getLeftTitle(double value, TitleMeta meta) {
     String unit = '';
     String text;
 
-    // Define la unidad según la variable
     switch (variableSeleccionada) {
       case 'Temperatura':
         unit = '°C';
@@ -264,7 +252,6 @@ class _HistoricalLineChart extends StatelessWidget {
     );
   }
 
-  // Función para calcular el rango del eje Y
   double _calculateMinY(List<FlSpot> spots) {
     if (spots.isEmpty) return 0;
     double minVal = spots.map((s) => s.y).reduce(min);
@@ -276,7 +263,6 @@ class _HistoricalLineChart extends StatelessWidget {
 
   double _calculateMaxY(List<FlSpot> spots) {
     if (spots.isEmpty) return 1;
-    // Encuentra el valor máximo y agrega un margen
     double maxVal = spots.map((s) => s.y).reduce(max);
     return (maxVal + 5).ceilToDouble();
   }
@@ -345,18 +331,15 @@ class _HistoricalLineChart extends StatelessWidget {
         : 0.0;
     if (maxSpotX > maxX) maxX = maxSpotX;
 
-    // Calcular límites Y para el rango de la gráfica
     final minY = _calculateMinY(spotsActual);
     final maxY = _calculateMaxY(spotsActual);
 
-    // Determinar el intervalo de los títulos Y.
     double yInterval = 5.0;
     if (variableSeleccionada == 'Luminosidad') {
       yInterval = (maxY / 4).ceilToDouble();
       if (yInterval > 100) yInterval = 100;
       if (yInterval > 200) yInterval = 200;
     } else {
-      // Para Temp/Humedad
       yInterval = (maxY - minY) / 4;
       if (yInterval > 5) yInterval = 5;
       if (yInterval < 2) yInterval = 2;
@@ -375,12 +358,11 @@ class _HistoricalLineChart extends StatelessWidget {
         show: true,
         rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-        // Títulos del EJE Y
         leftTitles: AxisTitles(
           sideTitles: SideTitles(
             showTitles: true,
-            reservedSize: 40, // Espacio reservado para las etiquetas
-            interval: yInterval, // Intervalo dinámico
+            reservedSize: 40,
+            interval: yInterval,
             getTitlesWidget: getLeftTitle,
           ),
         ),
@@ -388,7 +370,6 @@ class _HistoricalLineChart extends StatelessWidget {
           sideTitles: SideTitles(
             showTitles: true,
             reservedSize: 30,
-            // Intervalo: Día(4), Semana(1), Mes(4, para 15 puntos [0-14] -> 0, 4, 8, 12)
             interval: rango == 'Día' ? 4 : (rango == 'Semana' ? 1 : 4),
             getTitlesWidget: (value, meta) {
               String text = '';
@@ -404,7 +385,6 @@ class _HistoricalLineChart extends StatelessWidget {
                 const texts = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
                 text = texts.length > v ? texts[v] : '';
               } else if (rango == 'Mes') {
-                // El intervalo de 4 crea puntos en 0, 4, 8 y 12.
                 if (v == 0) {
                   text = 'Sem 1';
                 } else if (v == 4) {
@@ -441,14 +421,12 @@ class _HistoricalLineChart extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Título
             Text(
               'Histórico de $variableSeleccionada',
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 10),
-            // Segmented Button para cambiar la variable dentro del gráfico
             SegmentedButton<String>(
               segments: const [
                 ButtonSegment(value: 'Temperatura', label: Text('Temp')),
@@ -459,7 +437,7 @@ class _HistoricalLineChart extends StatelessWidget {
               onSelectionChanged: (v) => onSelectVariable(v.first),
               style: SegmentedButton.styleFrom(
                 selectedBackgroundColor: Colors.grey.shade200,
-                selectedForegroundColor: primaryColor,
+                selectedForegroundColor: primaryGreen,
               ),
             ),
             const SizedBox(height: 15),
@@ -467,7 +445,6 @@ class _HistoricalLineChart extends StatelessWidget {
               height: 200,
               child: LineChart(chartData),
             ),
-            // Leyenda
             Padding(
               padding: const EdgeInsets.only(top: 8.0),
               child: Text(
@@ -487,32 +464,32 @@ class _HistoricalLineChart extends StatelessWidget {
 // PÁGINA PRINCIPAL
 
 class ReportesHistoricosPage extends StatefulWidget {
-  const ReportesHistoricosPage({super.key});
+  final String appId;
+
+  const ReportesHistoricosPage({super.key, required this.appId});
+
 
   @override
   State<ReportesHistoricosPage> createState() => _ReportesHistoricosPageState();
 }
 
 class _ReportesHistoricosPageState extends State<ReportesHistoricosPage> {
-  // Estado para filtros
+
   String _rango = 'Semana';
   String _variableSeleccionada = 'Temperatura';
 
-  // Servicio de datos
-  final HistoricalDataService _service = HistoricalDataService();
+  late HistoricalDataService _service;
 
-  // Future que contendrá los datos del periodo seleccionado
   late Future<DatosHistoricos> _futureDataRangoSeleccionado;
-  late Future<DatosHistoricos> _futureDataMesCompleto; // Fuente de alertas globales
-
-  final Color secondaryColor = secondaryGreen;
-  final Color backgroundColor = const Color(0xFFF4F6F7);
+  late Future<DatosHistoricos> _futureDataMesCompleto;
 
   @override
   void initState() {
     super.initState();
+
+    _service = HistoricalDataService(appId: widget.appId);
     _futureDataRangoSeleccionado = _service.fetchHistoricalData(_rango);
-    _futureDataMesCompleto = _service.fetchHistoricalData('Mes'); // Carga de alertas
+    _futureDataMesCompleto = _service.fetchHistoricalData('Mes');
   }
 
   // Función para recargar los datos cuando cambia el filtro
@@ -628,10 +605,11 @@ class _ReportesHistoricosPageState extends State<ReportesHistoricosPage> {
 
   @override
   Widget build(BuildContext context) {
-    const Color primaryColor = Color(0xFF2E7D32);
-
+    const Color primaryGreen = Color(0xFF388E3C); // Verde BioSensor
+    const Color backgroundColor = Color(0xFFF8F5ED); // Fondo claro
+    const Color secondaryColor = Color(0xFF388E3C);
     return Scaffold(
-      drawer: Drawer(child: SideNav(currentRoute: 'reportes')),
+      drawer: Drawer(child: SideNav(currentRoute: 'reportes', appId: widget.appId)),
       appBar: AppBar(
         title: const Text('Reportes Históricos', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         backgroundColor: primaryGreen,
@@ -722,7 +700,7 @@ class _ReportesHistoricosPageState extends State<ReportesHistoricosPage> {
     final tempCriticaMax = UmbralesCultivo.tempCriticaMax.toStringAsFixed(1);
     final humedadCriticaMin = UmbralesCultivo.humedadCriticaMin.toStringAsFixed(0);
 
-    // Generación de Puntos de Análisis ---
+    // Generación de Puntos de Análisis 
 
     // Análisis de Temperatura
     String analisisTemp = "• **Temperatura**: Promedio de $tempProm°C (variación $tempCambio%). ";
@@ -754,12 +732,12 @@ class _ReportesHistoricosPageState extends State<ReportesHistoricosPage> {
     analisisPuntos.add(analisisLuz);
 
 
-    // Construcción del Widget ---
+    // Construcción del Widget 
 
     return Card(
       elevation: 3,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      color: Colors.white, // Fondo blanco para mayor contraste
+      color: Colors.white, 
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(
@@ -772,7 +750,6 @@ class _ReportesHistoricosPageState extends State<ReportesHistoricosPage> {
             ),
             const Divider(color: Colors.grey),
             const SizedBox(height: 5),
-
             // ANÁLISIS DETALLADO POR VARIABLE
             const Text(
               'Análisis del Periodo:',
@@ -789,8 +766,7 @@ class _ReportesHistoricosPageState extends State<ReportesHistoricosPage> {
               ),
             ).toList(),
             const SizedBox(height: 20),
-
-            // RECOMENDACIÓN ESTRATÉGICA (Destacado)
+            // RECOMENDACIÓN ESTRATÉGICA 
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
@@ -896,8 +872,8 @@ class _ReportesHistoricosPageState extends State<ReportesHistoricosPage> {
           trailing: const Icon(Icons.chevron_right),
           onTap: () {
             // Muestra los detalles de cada tipo de evento
-            Navigator.pop(context); // Cierra el resumen
-            _mostrarDetalleEventosSimples(context, eventos); // Abre el detalle simplificado
+            Navigator.pop(context); 
+            _mostrarDetalleEventosSimples(context, eventos); 
           },
         ),
         const Divider(height: 1, thickness: 0.5),
@@ -1122,23 +1098,3 @@ class _KpiCard extends StatelessWidget {
   }
 }
 
-// Widget principal de la aplicación (Necesario para ejecutar en un entorno real)
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Reporte Agrícola',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: primaryGreen),
-        useMaterial3: true,
-      ),
-      home: const ReportesHistoricosPage(),
-    );
-  }
-}

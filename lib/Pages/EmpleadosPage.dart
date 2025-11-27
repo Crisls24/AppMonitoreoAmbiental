@@ -4,30 +4,37 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:invernadero/Pages/SideNav.dart';
+import 'dart:developer';
+final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
 const Color primaryGreen = Color(0xFF2E7D32);
 const Color accentBlue = Color(0xFF42A5F5);
 const Color backgroundColor = Color(0xFFF8F5ED);
 
 class EmpleadosPage extends StatefulWidget {
-  const EmpleadosPage({super.key});
+  final String appId;
+
+  const EmpleadosPage({super.key, required this.appId});
 
   @override
   State<EmpleadosPage> createState() => _EmpleadosPageState();
 }
 
 class _EmpleadosPageState extends State<EmpleadosPage> {
-  final _firestore = FirebaseFirestore.instance;
   final _auth = FirebaseAuth.instance;
-
   String? _invernaderoId;
   bool _isLoading = true;
+  CollectionReference<Map<String, dynamic>> _getPublicCollectionRef(String collectionName) {
+    final path = 'artifacts/${widget.appId}/public/data/$collectionName';
+    return _firestore.collection(path);
+  }
 
   @override
   void initState() {
     super.initState();
   }
 
+  // Carga el ID del invernadero
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -36,42 +43,45 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
       if (idFromArgs != null && idFromArgs.isNotEmpty) {
         _invernaderoId = idFromArgs;
         if (mounted) {
-          setState(() {
-            _isLoading = false;
-          });
+          setState(() { _isLoading = false; });
         }
-      } else {
+      } else if (_invernaderoId == null) {
         _fallbackLoadInvernaderoId();
       }
     }
   }
 
-  // Funcion Carga el ID del invernadero asociado al usuario actual.
+  // Carga el ID del invernadero asociado al usuario actual (dueño o empleado).
   Future<void> _fallbackLoadInvernaderoId() async {
     final user = _auth.currentUser;
     if (user == null) {
       if(mounted) setState(() { _isLoading = false; });
       return;
     }
-    try {
-      // Intentar obtener el ID si el usuario es un empleado
-      final userDoc = await _firestore.collection('usuarios').doc(user.uid).get();
-      if (userDoc.exists) {
-        final data = userDoc.data();
-        String? idFromUser = data?['invernaderoId'] as String?;
 
-        if (idFromUser != null) {
-          _invernaderoId = idFromUser;
-        } else {
-          // Intentar obtener el ID si el usuario es el dueño
-          final ownerSnapshot = await _firestore
-              .collection('invernaderos')
-              .where('ownerId', isEqualTo: user.uid)
-              .limit(1)
-              .get();
-          if (ownerSnapshot.docs.isNotEmpty) {
-            _invernaderoId = ownerSnapshot.docs.first.id;
-          }
+    String? idFromUser;
+    final usuariosRef = _getPublicCollectionRef('usuarios');
+    final invernaderosRef = _getPublicCollectionRef('invernaderos');
+
+    try {
+      // Buscando en la colección de usuarios
+      log('[EmpleadosPage] Buscando user en: ${usuariosRef.path}', name: 'FirestorePath');
+      final userDoc = await usuariosRef.doc(user.uid).get();
+      if (userDoc.exists) {
+        idFromUser = userDoc.data()?['invernaderoId'] as String?;
+      }
+
+      if (idFromUser != null) {
+        _invernaderoId = idFromUser;
+      } else {
+        // Buscando en la colección de invernaderos como owner
+        log('[EmpleadosPage] Buscando owner en: ${invernaderosRef.path}', name: 'FirestorePath');
+        final ownerSnapshot = await invernaderosRef
+            .where('ownerId', isEqualTo: user.uid)
+            .limit(1)
+            .get();
+        if (ownerSnapshot.docs.isNotEmpty) {
+          _invernaderoId = ownerSnapshot.docs.first.id;
         }
       }
     } catch (e) {
@@ -82,17 +92,21 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
       }
     }
   }
-  // Esta es la "función que funciona" para obtener la lista de forma continua.
+
+  // Proporciona el Stream de empleados para el invernadero actual.
   Stream<QuerySnapshot>? _getEmpleadosStream() {
     if (_invernaderoId == null) return null;
-    return _firestore
-        .collection('usuarios')
+
+    final usuariosRef = _getPublicCollectionRef('usuarios');
+    log('[EmpleadosPage] Stream de empleados en: ${usuariosRef.path}', name: 'FirestorePath');
+
+    return usuariosRef
         .where('invernaderoId', isEqualTo: _invernaderoId)
         .where('rol', isEqualTo: 'empleado')
-        .snapshots(); // <- Usa snapshots() para la actualización en tiempo real
+        .snapshots(); 
   }
 
-  // Muestra un mensaje temporal
+  // Muestra un mensaje temporal en la parte inferior de la pantalla.
   void _showSnackBar(String message, IconData icon, Color color) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -113,7 +127,7 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
     );
   }
 
-  //ASIGNAR (Invitar Empleado)
+
   // Widget para mostrar el código de invitación
   Widget _buildCodeDisplay(String code) {
     return Container(
@@ -149,7 +163,8 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
     );
   }
 
-  // Muestra el diálogo de invitación y compartir.
+
+  // Muestra el diálogo de invitación con el código y el enlace para compartir.
   void _showShareDialog() async {
     if (_invernaderoId == null) {
       _showSnackBar('Error: ID del invernadero no disponible.', Icons.warning, Colors.orange);
@@ -158,7 +173,7 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
 
     String nombreInvernadero = 'Tu Invernadero';
     try {
-      final invDoc = await _firestore.collection('invernaderos').doc(_invernaderoId).get();
+      final invDoc = await _getPublicCollectionRef('invernaderos').doc(_invernaderoId).get();
       if (invDoc.exists) {
         nombreInvernadero = invDoc.data()?['nombre'] ?? 'Tu Invernadero';
       }
@@ -167,8 +182,10 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
     }
 
     final invernaderoId = _invernaderoId!;
-    final enlace = 'https://crisls24.github.io/biosensor-links/?invernadero=$invernaderoId';
+    const baseLink = 'https://crisls24.github.io/biosensor-links';
+    final enlace = '$baseLink/?invernadero=$invernaderoId';
 
+    if (!mounted) return;
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -224,6 +241,7 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
     );
   }
 
+  // Muestra el diálogo para editar el nombre de un empleado.
   Future<void> _showEditDialog(DocumentSnapshot empleado) async {
     final empId = empleado.id;
     final nombreController = TextEditingController(text: empleado['nombre'] ?? '');
@@ -237,7 +255,6 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Correo solo para referencia, deshabilitado
             TextField(
               controller: TextEditingController(text: emailDisplay),
               decoration: const InputDecoration(
@@ -248,7 +265,7 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
               style: const TextStyle(color: Colors.black87),
             ),
             const SizedBox(height: 10),
-            // Campo de nombre, editable
+            // Campo de nombre
             TextField(
               controller: nombreController,
               decoration: const InputDecoration(
@@ -276,15 +293,15 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
         _showSnackBar('El nombre no puede estar vacío.', Icons.error, Colors.redAccent);
         return;
       }
-      await _firestore.collection('usuarios').doc(empId).update({
+      if (!mounted) return;
+      await _getPublicCollectionRef('usuarios').doc(empId).update({
         'nombre': nuevoNombre,
       });
       _showSnackBar('Nombre actualizado correctamente', Icons.check_circle, primaryGreen);
     }
   }
 
-  // ELIMINAR (Revocar Acceso)
-
+  // Revoca el acceso de un empleado al invernadero.
   Future<void> _deleteEmpleado(String userId) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -304,15 +321,16 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
       ),
     );
     if (confirm == true) {
-      await _firestore.collection('usuarios').doc(userId).update({
+      if (!mounted) return;
+      await _getPublicCollectionRef('usuarios').doc(userId).update({
         'invernaderoId': FieldValue.delete(),
-        'rol': 'usuario' // Se restablece el rol por defecto
+        'rol': 'usuario'
       });
       _showSnackBar('Acceso de empleado revocado correctamente', Icons.person_remove, Colors.redAccent);
     }
   }
 
-  // Menú de opciones para cada empleado
+  // Muestra el menú de opciones para un empleado 
   void _showEmployeeOptionsMenu(DocumentSnapshot empleado) {
     final empNombre = empleado['nombre'] ?? 'Empleado';
 
@@ -364,6 +382,91 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
   }
 
 
+  // Muestra la vista si el usuario no tiene un invernadero asociado.
+  Widget _buildNoInvernaderoView() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.house_siding_rounded, size: 80, color: Colors.grey[400]),
+            const SizedBox(height: 20),
+            const Text(
+              'No tienes un invernadero asignado para gestionar empleados.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.black54, fontSize: 18),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Muestra la vista cuando no hay empleados registrados.
+  Widget _buildNoEmployeesView() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.people_alt_outlined, size: 80, color: Colors.grey[400]),
+            const SizedBox(height: 20),
+            const Text(
+              'No hay empleados registrados aún.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.black54, fontSize: 16),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              '¡Usa el botón flotante para invitar a tu primer colaborador!',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.black45, fontSize: 14),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Construye un elemento de la lista de empleados.
+  Widget _buildEmployeeListItem(DocumentSnapshot emp) {
+    final nombre = emp['nombre'] ?? 'Usuario sin nombre';
+    final email = emp['email'] ?? 'Correo no disponible';
+    final isPlaceholder = nombre.contains('Usuario sin nombre');
+
+    return Card(
+      elevation: 3,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+        leading: CircleAvatar(
+          backgroundColor: isPlaceholder ? Colors.orange.withOpacity(0.15) : primaryGreen.withOpacity(0.1),
+          child: Icon(
+            isPlaceholder ? Icons.lock_open_rounded : Icons.person_rounded,
+            color: isPlaceholder ? Colors.orange : primaryGreen,
+          ),
+        ),
+        title: Text(nombre,
+            style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: isPlaceholder ? Colors.orange : Colors.black87)),
+        subtitle: Text(email, style: const TextStyle(color: Colors.black54)),
+        trailing: IconButton(
+          icon: const Icon(Icons.more_vert),
+          color: Colors.black54,
+          onPressed: () => _showEmployeeOptionsMenu(emp),
+        ),
+      ),
+    );
+  }
+
+  // Widget Principal
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -376,40 +479,25 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
     if (_invernaderoId == null) {
       return Scaffold(
         backgroundColor: backgroundColor,
+        drawer: Drawer(child: SideNav(currentRoute: 'empleado', appId: widget.appId)),
         appBar: AppBar(
           title: const Text('Gestión de Empleados', style: TextStyle(color: Colors.white)),
           backgroundColor: primaryGreen,
         ),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(20.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.house_siding_rounded, size: 80, color: Colors.grey[400]),
-                const SizedBox(height: 20),
-                const Text(
-                  'No tienes un invernadero asignado para gestionar empleados.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.black54, fontSize: 18),
-                ),
-              ],
-            ),
-          ),
-        ),
+        body: _buildNoInvernaderoView(), 
       );
     }
 
     return Scaffold(
       backgroundColor: backgroundColor,
-      drawer: Drawer(child: SideNav(currentRoute: 'empleado')),
+      drawer: Drawer(child: SideNav(currentRoute: 'empleado', appId: widget.appId)),
       appBar: AppBar(
         backgroundColor: primaryGreen,
         elevation: 0,
         centerTitle: true,
         iconTheme: const IconThemeData(color: Colors.white),
         title: const Text(
-          "Gestion Empleados",
+          "Gestión de Empleados",
           style: TextStyle(
               color: Colors.white, fontWeight: FontWeight.bold, fontSize: 19),
         ),
@@ -427,67 +515,14 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
           final empleados = snapshot.data!.docs;
 
           if (empleados.isEmpty) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.people_alt_outlined, size: 80, color: Colors.grey[400]),
-                    const SizedBox(height: 20),
-                    const Text(
-                      'No hay empleados registrados aún.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.black54, fontSize: 16),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      '¡Usa el botón flotante para invitar a tu primer colaborador!',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.black45, fontSize: 14),
-                    ),
-                  ],
-                ),
-              ),
-            );
+            return _buildNoEmployeesView(); 
           }
 
           return ListView.builder(
             padding: const EdgeInsets.all(16),
             itemCount: empleados.length,
             itemBuilder: (context, index) {
-              final emp = empleados[index];
-              final nombre = emp['nombre'] ?? 'Usuario sin nombre';
-              final email = emp['email'] ?? 'Correo no disponible';
-              final isPlaceholder = nombre.contains('Usuario sin nombre');
-
-              return Card(
-                elevation: 3,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                margin: const EdgeInsets.symmetric(vertical: 8),
-                child: ListTile(
-                  contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                  leading: CircleAvatar(
-                    backgroundColor: isPlaceholder ? Colors.orange.withOpacity(0.15) : primaryGreen.withOpacity(0.1),
-                    child: Icon(
-                      isPlaceholder ? Icons.lock_open_rounded : Icons.person_rounded,
-                      color: isPlaceholder ? Colors.orange : primaryGreen,
-                    ),
-                  ),
-                  title: Text(nombre,
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: isPlaceholder ? Colors.orange : Colors.black87)),
-                  subtitle: Text(email, style: const TextStyle(color: Colors.black54)),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.more_vert),
-                    color: Colors.black54,
-                    onPressed: () => _showEmployeeOptionsMenu(emp),
-                  ),
-                ),
-              );
+              return _buildEmployeeListItem(empleados[index]); 
             },
           );
         },
@@ -503,7 +538,7 @@ class _EmpleadosPageState extends State<EmpleadosPage> {
   }
 }
 
-// Clases de navegación.
+// Clases de Navegación 
 
 class DetalleEmpleadoPage extends StatelessWidget {
   final DocumentSnapshot empleado;

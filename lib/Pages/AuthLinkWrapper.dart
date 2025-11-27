@@ -5,11 +5,28 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:app_links/app_links.dart';
 import 'package:invernadero/Pages/GestionInvernadero.dart';
 import 'package:invernadero/Pages/HomePage.dart';
-import 'package:invernadero/Pages/login.dart';
+import 'package:invernadero/Pages/InicioSesionPage.dart';
 import 'package:invernadero/Pages/SeleccionRol.dart';
+import 'dart:developer';
+
+final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+// FUNCIÓN AUXILIAR DE REFERENCIA (Colección por Niveles)
+// Define el helper local para obtener la CollectionReference de datos públicos.
+CollectionReference _getPublicCollectionRef(String appId, String collectionName) {
+  return _firestore
+      .collection('artifacts')
+      .doc(appId)
+      .collection('public')
+      .doc('data')
+      .collection(collectionName);
+}
+
 
 class AuthLinkWrapper extends StatefulWidget {
-  const AuthLinkWrapper({super.key});
+  final String appId; 
+
+  const AuthLinkWrapper({super.key, required this.appId});
 
   @override
   State<AuthLinkWrapper> createState() => _AuthLinkWrapperState();
@@ -22,11 +39,12 @@ class _AuthLinkWrapperState extends State<AuthLinkWrapper> {
 
   bool _isLoading = true;
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  late final CollectionReference _usuariosCollectionRef;
 
   @override
   void initState() {
     super.initState();
+    _usuariosCollectionRef = _getPublicCollectionRef(widget.appId, 'usuarios');
     _initialize();
   }
 
@@ -52,13 +70,14 @@ class _AuthLinkWrapperState extends State<AuthLinkWrapper> {
     });
     // Esperar a que FirebaseAuth emita el usuario actual
     _auth.authStateChanges().listen((user) async {
-      await _handleAuthState(user);
+      if (mounted && _isLoading) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     });
-    await Future.delayed(const Duration(seconds: 3));
-    if (mounted && _isLoading) {
-      setState(() => _isLoading = false);
-    }
   }
+
   // Manejo de los enlaces
   void _handleLink(Uri? uri) {
     if (uri != null && uri.queryParameters.containsKey('invernadero')) {
@@ -69,51 +88,6 @@ class _AuthLinkWrapperState extends State<AuthLinkWrapper> {
         });
         debugPrint('Deep Link capturado: $id');
       }
-    }
-  }
-
-  // Maneja el estado de autenticación y rol del usuario
-  Future<void> _handleAuthState(User? user) async {
-    if (user == null) {
-      // No autenticado
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-      return;
-    }
-    try {
-      final doc = await _firestore.collection('usuarios').doc(user.uid).get();
-      if (!doc.exists) {
-        // No tiene registro en Firestore / selección de rol
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-          });
-        }
-        return;
-      }
-
-      final data = doc.data() as Map<String, dynamic>?;
-
-      if (data == null || !data.containsKey('rol') || data['rol'] == null) {
-        // No tiene rol
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-          });
-        }
-        return;
-      }
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      debugPrint('Error al verificar rol del usuario: $e');
-      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -129,30 +103,57 @@ class _AuthLinkWrapperState extends State<AuthLinkWrapper> {
         ),
       );
     }
+
+    // USUARIO NO AUTENTICADO
     if (user == null) {
-      return InicioSesion(invernaderoIdToJoin: _invernaderoIdFromLink);
+      return InicioSesion(
+        invernaderoIdToJoin: _invernaderoIdFromLink,
+        appId: widget.appId,
+      );
     }
 
-    // Verificar si tiene rol
+    // USUARIO AUTENTICADO: Verificar si tiene rol
     return FutureBuilder<DocumentSnapshot>(
-      future: _firestore.collection('usuarios').doc(user.uid).get(),
+      future: _usuariosCollectionRef.doc(user.uid).get(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             backgroundColor: Colors.white,
             body: Center(child: CircularProgressIndicator(color: Color(0xFF2E7D32))),
           );
         }
-        final data = snapshot.data?.data() as Map<String, dynamic>?;
-        if (data == null || !data.containsKey('rol') || data['rol'] == null) {
-          return SeleccionRol(invernaderoIdFromLink: _invernaderoIdFromLink);
+
+        if (snapshot.hasError) {
+          log('Error al cargar perfil de usuario (CollectionRef): ${snapshot.error}', name: 'FirestoreDebug');
+          return Scaffold(
+            body: Center(child: Text('Error de carga o permisos: ${snapshot.error}')),
+          );
         }
-        if (data['rol'] == 'dueño') {
-          return const Gestioninvernadero();
-        } else if (data['rol'] == 'empleado') {
-          return const HomePage();
+        final data = snapshot.data?.data() as Map<String, dynamic>?;
+        final rol = data?['rol'];
+
+        // USUARIO SIN ROL ASIGNADO
+        if (data == null || rol == null || rol.isEmpty) {
+          log('Usuario autenticado sin rol. Redirigiendo a selección de rol.', name: 'AuthFlow');
+          return SeleccionRol(
+            invernaderoIdFromLink: _invernaderoIdFromLink,
+            appId: widget.appId,
+          );
+        }
+        // USUARIO CON ROL ASIGNADO
+        if (rol == 'dueño') {
+          log('Usuario autenticado como dueño. Redirigiendo a GestiónInvernadero.', name: 'AuthFlow');
+          return Gestioninvernadero(appId: widget.appId);
+        } else if (rol == 'empleado') {
+          log('Usuario autenticado como empleado. Redirigiendo a HomePage.', name: 'AuthFlow');
+          return HomePage(appId: widget.appId);
         } else {
-          return const SeleccionRol();
+          // Rol inesperado, volvemos a selección de rol por seguridad.
+          log('Usuario autenticado con rol desconocido ($rol). Redirigiendo a selección de rol.', name: 'AuthFlow');
+          return SeleccionRol(
+            invernaderoIdFromLink: _invernaderoIdFromLink,
+            appId: widget.appId,
+          );
         }
       },
     );
