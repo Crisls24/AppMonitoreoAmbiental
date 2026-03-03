@@ -1,3 +1,5 @@
+// SensorPage.dart
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -17,21 +19,23 @@ class UrgentMaintenance {
 
   UrgentMaintenance({required this.sensorId, required this.nextDate, required this.isOverdue});
 }
+
 enum SensorStatus { ok, advertencia, anomalia, critico, sinDatos }
 
-// PAGINA PRINCIPAL DE SENSORES
+// -------------------------------------------------------------
+// PÁGINA PRINCIPAL DE SENSORES (USANDO RTDB EN TIEMPO REAL)
+// -------------------------------------------------------------
 
 class SensorPage extends StatefulWidget {
   final String rtdbPath;
   final String? invernaderoId;
   final String appId;
 
-
   const SensorPage({
     super.key,
     required this.rtdbPath,
     this.invernaderoId,
-    required this.appId, 
+    required this.appId,
   });
 
   @override
@@ -39,10 +43,14 @@ class SensorPage extends StatefulWidget {
 }
 
 class _SensorPageState extends State<SensorPage> {
-
   late DatabaseReference _rootRef;
   late Stream<DatabaseEvent> _stream;
   final String _supportPhoneNumber = "+527711509246";
+
+  // Cache de alertas
+  List<UrgentMaintenance> _cachedAlerts = [];
+  bool _loadingAlerts = true;
+  Timer? _alertsTimer;
 
   @override
   void initState() {
@@ -51,53 +59,118 @@ class _SensorPageState extends State<SensorPage> {
         ? widget.rtdbPath.substring(0, widget.rtdbPath.length - 1)
         : widget.rtdbPath;
 
-    _rootRef = FirebaseDatabase.instance.ref(safeRtdbPath);
-    _stream = _rootRef.onValue;
+    // Inicialización para leer Firebase Realtime Database
+    _rootRef = FirebaseDatabase.instance.ref(safeRtdbPath); 
+    _stream = _rootRef.onValue; 
+    
     Intl.defaultLocale = 'es_ES';
+
+    // Cargar alertas al inicio y refrescar cada 60s 
+    _loadUrgentAlerts();
+    _alertsTimer = Timer.periodic(const Duration(seconds: 60), (_) => _loadUrgentAlerts());
+  }
+
+  @override
+  void dispose() {
+    _alertsTimer?.cancel();
+    super.dispose();
+  }
+
+
+  int _normalizeTimestamp(dynamic raw) {
+    if (raw == null) return 0;
+    if (raw is int) {
+      if (raw < 1000000000000) return raw * 1000;
+      return raw;
+    }
+    if (raw is double) {
+      if (raw < 1000000000000) return (raw * 1000).toInt();
+      return raw.toInt();
+    }
+    if (raw is String) {
+      final parsed = int.tryParse(raw);
+      if (parsed != null) return _normalizeTimestamp(parsed);
+    }
+    return 0;
   }
 
   // EVALUACIÓN DEL ESTADO DEL SENSOR
-  SensorStatus _evaluate(dynamic value, int timestamp) {
+  SensorStatus _evaluate(dynamic value, int rawTimestamp) {
+    final timestamp = _normalizeTimestamp(rawTimestamp);
     final now = DateTime.now().millisecondsSinceEpoch;
+
+    // Si no hay timestamp reciente -> sin datos
     if (timestamp == 0 || now - timestamp > 10 * 60 * 1000) {
+      // 10 minutos como umbral (configurable)
       return SensorStatus.sinDatos;
     }
+
     // Comprobaciones de anomalías y críticos
     if (value == null || (value is! num && value is! String)) return SensorStatus.critico;
     if (value is String && value.isEmpty) return SensorStatus.anomalia;
+
+    // Si es num y está en rango realista -> OK
     return SensorStatus.ok;
   }
-  // Obtiene alertas de mantenimiento
-  Future<List<UrgentMaintenance>> _getUrgentAlerts() async {
-    if (widget.invernaderoId == null) return [];
-    final querySnapshot = await FirebaseFirestore.instance
-        .collection('mantenimientos')
-        .where('invernaderoId', isEqualTo: widget.invernaderoId)
-        .get();
 
-    List<UrgentMaintenance> urgentList = [];
-    final now = DateTime.now();
+  // Obtiene alertas de mantenimiento de Firestore y las cachea
+  Future<void> _loadUrgentAlerts() async {
+    if (widget.invernaderoId == null) {
+      if (mounted) setState(() { _cachedAlerts = []; _loadingAlerts = false; });
+      return;
+    }
 
-    for (var doc in querySnapshot.docs) {
-      final data = doc.data();
-      final ultimo = data["ultimo"] as Timestamp?;
-      final intervaloDias = data["intervaloDias"] as int? ?? 30;
-      final sensorId = data["sensorId"] as String? ?? "Desconocido";
+    try {
+      final querySnapshot = await FirebaseFirestore.instance
+          .collection('mantenimientos')
+          .where('invernaderoId', isEqualTo: widget.invernaderoId)
+          .get();
 
-      if (ultimo != null) {
-        final next = ultimo.toDate().add(Duration(days: intervaloDias));
-        final difference = next.difference(now).inDays;
+      final now = DateTime.now();
+      List<UrgentMaintenance> urgentList = [];
 
-        if (difference <= 7) {
-          urgentList.add(UrgentMaintenance(
-            sensorId: sensorId,
-            nextDate: next,
-            isOverdue: difference < 0,
-          ));
+      for (var doc in querySnapshot.docs) {
+        final data = doc.data();
+        final ultimo = data["ultimo"] as Timestamp?;
+        final intervaloDias = data["intervaloDias"] as int? ?? 30;
+        final sensorId = data["sensorId"] as String? ?? doc.id;
+
+        if (ultimo != null) {
+          final next = ultimo.toDate().add(Duration(days: intervaloDias));
+          final difference = next.difference(now).inDays;
+
+          if (difference <= 7) {
+            urgentList.add(UrgentMaintenance(
+              sensorId: sensorId,
+              nextDate: next,
+              isOverdue: difference < 0,
+            ));
+          }
         }
       }
+
+      // Orden consistente: vencidas primero, luego próximas
+      urgentList.sort((a, b) {
+        if (a.isOverdue && !b.isOverdue) return -1;
+        if (!a.isOverdue && b.isOverdue) return 1;
+        return a.nextDate.compareTo(b.nextDate);
+      });
+
+      if (mounted) {
+        setState(() {
+          _cachedAlerts = urgentList;
+          _loadingAlerts = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _cachedAlerts = [];
+          _loadingAlerts = false;
+        });
+      }
+      debugPrint('Error cargando alertas: $e');
     }
-    return urgentList;
   }
 
   // Funcion llamada telefónica
@@ -133,6 +206,122 @@ class _SensorPageState extends State<SensorPage> {
     );
   }
 
+  // ---------------------------------------------------
+  // CONSTRUIR BANNER ESTABLE (si no hay alertas mostramos un estado "todo ok")
+  // ---------------------------------------------------
+  Widget _buildBannerArea() {
+    // Altura fija mínima para evitar cambios bruscos 
+    final minHeight = 72.0;
+
+    if (_loadingAlerts) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+        child: Container(
+          constraints: BoxConstraints(minHeight: minHeight),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: primaryGreen.withOpacity(0.03),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: primaryGreen.withOpacity(0.08)),
+          ),
+          child: Row(
+            children: [
+              const SizedBox(width: 6),
+              const CircularProgressIndicator(strokeWidth: 2, color: primaryGreen),
+              const SizedBox(width: 12),
+              Text('Cargando alertas de mantenimiento...', style: TextStyle(color: secondaryText)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_cachedAlerts.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+        child: Container(
+          constraints: BoxConstraints(minHeight: minHeight),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: primaryGreen.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: primaryGreen.withOpacity(0.3)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.verified_rounded, color: primaryGreen),
+              const SizedBox(width: 10),
+              const Expanded(child: Text("¡Todos los mantenimientos están en orden!", style: TextStyle(color: primaryGreen, fontWeight: FontWeight.w500))),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Hay alertas -> construir banner (vencidas / próximas)
+    final overdueCount = _cachedAlerts.where((a) => a.isOverdue).length;
+    final nearDueCount = _cachedAlerts.length - overdueCount;
+
+    String mainMessage = "";
+    Color bannerColor = Colors.orange.shade700;
+    IconData bannerIcon = Icons.warning_rounded;
+
+    if (overdueCount > 0) {
+      mainMessage = "¡ATENCIÓN! $overdueCount sensor(es) tiene(n) mantenimiento VENCIDO.";
+      bannerColor = Colors.red.shade700;
+      bannerIcon = Icons.dangerous_rounded;
+    } else {
+      mainMessage = "$nearDueCount sensor(es) requieren mantenimiento pronto (7 días).";
+      bannerColor = Colors.orange.shade700;
+      bannerIcon = Icons.notification_important_rounded;
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0),
+      child: Container(
+        constraints: BoxConstraints(minHeight: minHeight),
+        padding: const EdgeInsets.all(16),
+        margin: const EdgeInsets.only(bottom: 16),
+        decoration: BoxDecoration(
+          color: bannerColor.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: bannerColor.withOpacity(0.5), width: 2),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(bannerIcon, color: bannerColor, size: 24),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    mainMessage,
+                    style: TextStyle(color: bannerColor, fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            // Lista pequeña de sensores -> limitar a 3 para no expandir demasiado
+            ..._cachedAlerts.take(3).map((alert) {
+              return Padding(
+                padding: const EdgeInsets.only(left: 34, top: 4, bottom: 2),
+                child: Text(
+                  "${alert.sensorId.toUpperCase()}: ${alert.isOverdue ? 'VENCIDO' : 'Próximo: ${DateFormat('dd/MM').format(alert.nextDate)}'}",
+                  style: TextStyle(fontSize: 13, color: secondaryText),
+                ),
+              );
+            }).toList(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------
+  // BUILD PRINCIPAL (USANDO StreamBuilder para RTDB)
+  // ---------------------------------------------------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -140,14 +329,14 @@ class _SensorPageState extends State<SensorPage> {
       drawer: Drawer(child: SideNav(currentRoute: 'sensor', appId: widget.appId)),
       appBar: AppBar(
         title: const Text(
-          "Monitoreo de Sensores",
+          "Monitoreo de Sensores", // Título restaurado
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
         ),
         backgroundColor: primaryGreen,
         iconTheme: const IconThemeData(color: Colors.white),
       ),
-
-      body: StreamBuilder(
+      // StreamBuilder para leer datos en tiempo real de Firebase
+      body: StreamBuilder<DatabaseEvent>(
         stream: _stream,
         builder: (_, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
@@ -157,13 +346,15 @@ class _SensorPageState extends State<SensorPage> {
           final raw = snap.data?.snapshot.value;
 
           if (raw == null || raw is! Map) {
+            // Si no hay datos, mostramos un mensaje general de desconexión
             return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.wifi_off_rounded, size: 60, color: Colors.grey[400]),
+                  Icon(Icons.cloud_off_rounded, size: 60, color: Colors.blueGrey.shade400),
                   const SizedBox(height: 16),
-                  const Text("Sin datos del sistema o estructura incorrecta.", style: TextStyle(color: secondaryText)),
+                  const Text("Esperando datos de sensores en RTDB...", style: TextStyle(color: secondaryText)),
+                  Text("Ruta: ${widget.rtdbPath}", style: TextStyle(fontSize: 12, color: secondaryText.withOpacity(0.7))),
                 ],
               ),
             );
@@ -171,185 +362,99 @@ class _SensorPageState extends State<SensorPage> {
 
           final data = Map<String, dynamic>.from(raw as Map);
 
+          // Extraer las claves de sensores: detectamos keys que tengan un timestamp asociado
           final sensorKeys = data.keys.where((k) =>
-          !k.contains('timestamp') && data.containsKey('${k}_timestamp')
+              !k.toString().contains('_timestamp') && data.containsKey('${k}_timestamp')
           ).toList();
 
+          // Si no encontramos keys con timestamp, consideramos keys que no sean 'timestamp'
           if (sensorKeys.isEmpty && data.keys.length > 1) {
             sensorKeys.addAll(data.keys.where((k) => k != "timestamp"));
           }
-          List<Widget> children = [];
-          children.add(const SizedBox(height: 16));
 
-          // Tarjeta de Alerta Global
-          if (widget.invernaderoId != null) {
-            children.add(
-              FutureBuilder<List<UrgentMaintenance>>(
-                future: _getUrgentAlerts(),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const SizedBox.shrink();
-                  }
+          // Ordenar las keys de forma estable (alfabéticamente)
+          sensorKeys.sort((a, b) => a.toString().compareTo(b.toString()));
 
-                  final alerts = snapshot.data ?? [];
+          // Construimos la lista de widgets de forma estable usando ListView.builder
+          return ListView.builder(
+            padding: EdgeInsets.zero,
+            itemCount: 
+                1 + sensorKeys.length + 1 + 1,
+            itemBuilder: (context, index) {
+              // index 0: banner
+              if (index == 0) {
+                return Column(
+                  children: [
+                    const SizedBox(height: 16),
+                    _buildBannerArea(),
+                  ],
+                );
+              }
 
-                  if (alerts.isEmpty) {
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                      child: Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: primaryGreen.withOpacity(0.05),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: primaryGreen.withOpacity(0.3)),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.verified_rounded, color: primaryGreen),
-                            const SizedBox(width: 10),
-                            const Text("¡Todos los mantenimientos estan en orden!", style: TextStyle(color: primaryGreen, fontWeight: FontWeight.w500)),
-                          ],
-                        ),
-                      ),
-                    );
-                  }
+              final sensorStart = 1;
+              if (index >= sensorStart && index < sensorStart + sensorKeys.length) {
+                final key = sensorKeys[index - sensorStart];
+                final value = data[key];
+                final tsRaw = data["${key}_timestamp"] ?? data["timestamp"] ?? 0;
+                final status = _evaluate(value, tsRaw);
 
-                  // Si hay alertas, se lanza tarjeta roja/naranja
-                  final overdueCount = alerts.where((a) => a.isOverdue).length;
-                  final nearDueCount = alerts.where((a) => !a.isOverdue).length;
+                // Cada card tiene una Key estable para evitar reordenamientos visibles
+                return Padding(
+                  key: ValueKey("sensor_card_$key"),
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: SensorCard(
+                    key: ValueKey("sensor_card_inner_$key"),
+                    sensorId: key,
+                    valor: value,
+                    timestamp: tsRaw is int ? tsRaw : (tsRaw is String ? int.tryParse(tsRaw) ?? 0 : 0),
+                    status: status,
+                    invernaderoId: widget.invernaderoId,
+                  ),
+                );
+              }
 
-                  String mainMessage = "";
-                  Color bannerColor = Colors.orange.shade700;
-                  IconData bannerIcon = Icons.warning_rounded;
-
-                  if (overdueCount > 0) {
-                    mainMessage = "¡ATENCIÓN! $overdueCount sensor(es) tiene(n) mantenimiento VENCIDO.";
-                    bannerColor = Colors.red.shade700;
-                    bannerIcon = Icons.dangerous_rounded;
-                  } else {
-                    mainMessage = "$nearDueCount sensor(es) requieren mantenimiento pronto (7 días).";
-                    bannerColor = Colors.orange.shade700;
-                    bannerIcon = Icons.notification_important_rounded;
-                  }
-
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                    child: Container(
-                      padding: const EdgeInsets.all(16),
-                      margin: const EdgeInsets.only(bottom: 16),
-                      decoration: BoxDecoration(
-                        color: bannerColor.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: bannerColor.withOpacity(0.5), width: 2),
-                      ),
+              // tarjeta de contacto/ayuda 
+              final helpIndex = 1 + sensorKeys.length;
+              if (index == helpIndex) {
+                return Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Card(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    elevation: 4,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          Text(
+                            "Soporte y Asistencia Técnica",
+                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: primaryGreen),
+                          ),
+                          const Divider(height: 20),
                           Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Icon(bannerIcon, color: bannerColor, size: 24),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  mainMessage,
-                                  style: TextStyle(color: bannerColor, fontWeight: FontWeight.bold, fontSize: 16),
-                                ),
+                              Text("Servicio de Ayuda:", style: TextStyle(fontSize: 16, color: secondaryText.withOpacity(0.8))),
+                              TextButton.icon(
+                                onPressed: _makeCall,
+                                icon: const Icon(Icons.phone_rounded, color: primaryGreen),
+                                label: Text(_supportPhoneNumber, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: primaryGreen, decoration: TextDecoration.underline)),
+                                style: TextButton.styleFrom(padding: EdgeInsets.zero),
                               ),
                             ],
                           ),
-                          const Divider(height: 10, color: Colors.transparent),
-
-                          // Lista de sensores afectados
-                          ...alerts.map((alert) {
-                            return Padding(
-                              padding: const EdgeInsets.only(left: 34, top: 4),
-                              child: Text(
-                                "${alert.sensorId.toUpperCase()}: "
-                                    "${alert.isOverdue ? 'VENCIDO' : 'Próximo: ${DateFormat('dd/MM').format(alert.nextDate)}'}",
-                                style: TextStyle(fontSize: 13, color: secondaryText),
-                              ),
-                            );
-                          }).toList(),
+                          const SizedBox(height: 4),
+                          Text("Llama ahora para soporte inmediato o asistencia con el mantenimiento de sensores.", style: TextStyle(fontSize: 12, color: secondaryText.withOpacity(0.7))),
                         ],
                       ),
                     ),
-                  );
-                },
-              ),
-            );
-          }
-
-          // Tarjetas de Sensores
-
-          children.addAll(sensorKeys.map((key) {
-            final value = data[key];
-            final ts = data["${key}_timestamp"] ?? data["timestamp"] ?? 0;
-            final status = _evaluate(value, ts is int ? ts : 0);
-
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0),
-              child: SensorCard(
-                sensorId: key,
-                valor: value,
-                timestamp: ts is int ? ts : 0,
-                status: status,
-                invernaderoId: widget.invernaderoId,
-              ),
-            );
-          }).toList());
-
-          // Tarjeta de Contacto/Ayuda
-
-          children.add(
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Card(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                elevation: 4,
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        "Soporte y Asistencia Técnica",
-                        style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: primaryGreen),
-                      ),
-                      const Divider(height: 20),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            "Servicio de Ayuda:",
-                            style: TextStyle(fontSize: 16, color: secondaryText.withOpacity(0.8)),
-                          ),
-                          TextButton.icon(
-                            onPressed: _makeCall,
-                            icon: const Icon(Icons.phone_rounded, color: primaryGreen),
-                            label: Text(
-                              _supportPhoneNumber,
-                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: primaryGreen, decoration: TextDecoration.underline),
-                            ),
-                            style: TextButton.styleFrom(padding: EdgeInsets.zero),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text("Llama ahora para soporte inmediato o asistencia con el mantenimiento de sensores.",
-                          style: TextStyle(fontSize: 12, color: secondaryText.withOpacity(0.7))),
-                    ],
                   ),
-                ),
-              ),
-            ),
-          );
-          children.add(const SizedBox(height: 20));
-          return ListView(
-            padding: EdgeInsets.zero,
-            children: children,
+                );
+              }
+
+              // último: spacing
+              return const SizedBox(height: 20);
+            },
           );
         },
       ),
@@ -357,7 +462,9 @@ class _SensorPageState extends State<SensorPage> {
   }
 }
 
-// TARJETAS DE SENSOR
+// ---------------------------------------------------
+// TARJETAS DE SENSOR 
+// ---------------------------------------------------
 
 class SensorCard extends StatelessWidget {
   final String sensorId;
@@ -374,6 +481,7 @@ class SensorCard extends StatelessWidget {
     required this.status,
     required this.invernaderoId,
   });
+
   // Color según estado
   Color get _color {
     switch (status) {
@@ -389,6 +497,7 @@ class SensorCard extends StatelessWidget {
         return Colors.blueGrey.shade400;
     }
   }
+
   // Icono según estado
   IconData get _icon {
     switch (status) {
@@ -422,8 +531,10 @@ class SensorCard extends StatelessWidget {
   }
 
   String get _formattedValue {
+    if (valor == null || status == SensorStatus.sinDatos) return "N/D";
     if (valor is num) {
-      return valor.toStringAsFixed(valor is int ? 0 : 1);
+      if (valor is int) return valor.toString();
+      return (valor as num).toStringAsFixed(1);
     }
     if (valor is String && valor.isNotEmpty) {
       return valor;
@@ -432,18 +543,23 @@ class SensorCard extends StatelessWidget {
   }
 
   String get _unit {
-    if (sensorId.toLowerCase().contains('temp')) return ' °C';
-    if (sensorId.toLowerCase().contains('humedad')) return ' %';
-    if (sensorId.toLowerCase().contains('luz')) return ' Lux';
-    if (sensorId.toLowerCase().contains('riego')) return '';
+    if (status == SensorStatus.sinDatos) return '';
+    final lower = sensorId.toLowerCase();
+    if (lower.contains('temp')) return ' °C';
+    if (lower.contains('humedad')) return ' %';
+    if (lower.contains('luz')) return ' Lux';
+    if (lower.contains('co2')) return ' ppm';
+    if (lower.contains('ph')) return '';
+    if (lower.contains('riego')) return '';
     return '';
   }
 
   @override
   Widget build(BuildContext context) {
-    final dt = timestamp > 0
-        ? DateTime.fromMillisecondsSinceEpoch(timestamp)
-        : null;
+    final dt = timestamp > 0 ? DateTime.fromMillisecondsSinceEpoch(
+        (timestamp < 1000000000000) ? timestamp * 1000 : timestamp
+    ) : null;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
@@ -549,7 +665,7 @@ class SensorCard extends StatelessWidget {
                         const SizedBox(width: 8),
                         Text(
                           "Última actualización: "
-                              "${dt != null ? "${dt.hour}:${dt.minute} del ${dt.day}/${dt.month}" : "N/A"}",
+                               "${dt != null ? "${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')} del ${dt.day}/${dt.month}" : "N/A"}",
                           style: TextStyle(fontSize: 12, color: secondaryText.withOpacity(0.8)),
                         ),
                       ],
@@ -571,7 +687,6 @@ class SensorCard extends StatelessWidget {
                               ),
                             );
                           },
-                          // Botón para gestionar mantenimiento
                           icon: const Icon(Icons.build_circle_rounded, size: 18),
                           label: const Text("Gestionar Mantenimiento"),
                           style: TextButton.styleFrom(
@@ -589,26 +704,19 @@ class SensorCard extends StatelessWidget {
       ),
     );
   }
+
   Widget _buildMaintenanceInfo() {
     if (invernaderoId == null) {
       return Container();
     }
     final docPath = "${invernaderoId}_$sensorId";
     return FutureBuilder<DocumentSnapshot>(
-      future: FirebaseFirestore.instance
-          .collection("mantenimientos")
-          .doc(docPath)
-          .get(),
+      future: FirebaseFirestore.instance.collection("mantenimientos").doc(docPath).get(),
       builder: (context, snap) {
         if (!snap.hasData || snap.connectionState == ConnectionState.waiting) {
-          // Si no hay datos, muestra un placeholder simple
-          return const Text(
-            "Mantenimiento: Cargando...",
-            style: TextStyle(fontSize: 12, color: secondaryText),
-          );
+          return const Text("Mantenimiento: Cargando...", style: TextStyle(fontSize: 12, color: secondaryText));
         }
 
-        // Datos de mantenimiento
         final data = (snap.data?.data() ?? {}) as Map;
         final ultimo = data["ultimo"] as Timestamp?;
         final intervaloDias = data["intervaloDias"] as int? ?? 30;
@@ -625,7 +733,6 @@ class SensorCard extends StatelessWidget {
           final next = dtUltimo.add(Duration(days: intervaloDias));
           proximoMantenimiento = DateFormat('dd/MM/yyyy').format(next);
 
-          // Lógica de alerta si se acerca la fecha
           final difference = next.difference(DateTime.now()).inDays;
           if (difference <= 7 && difference >= 0) {
             nextColor = Colors.orange.shade700;
@@ -642,23 +749,13 @@ class SensorCard extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Próximo Mantenimiento (Destacado si es crítico)
             Row(
               children: [
                 Icon(nextIcon, size: 16, color: nextColor),
                 const SizedBox(width: 8),
-                Text(
-                  "Próximo Mantenimiento:",
-                  style: TextStyle(fontSize: 12, color: nextColor, fontWeight: FontWeight.bold),
-                ),
+                Text("Próximo Mantenimiento:", style: TextStyle(fontSize: 12, color: nextColor, fontWeight: FontWeight.bold)),
                 const SizedBox(width: 4),
-                Expanded(
-                  child: Text(
-                    proximoMantenimiento,
-                    style: TextStyle(fontSize: 12, color: nextColor, fontWeight: FontWeight.bold),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
+                Expanded(child: Text(proximoMantenimiento, style: TextStyle(fontSize: 12, color: nextColor, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
               ],
             ),
             const SizedBox(height: 4),
@@ -666,15 +763,9 @@ class SensorCard extends StatelessWidget {
               children: [
                 Icon(Icons.calendar_today_rounded, size: 16, color: secondaryText.withOpacity(0.6)),
                 const SizedBox(width: 8),
-                Text(
-                  "Último:",
-                  style: TextStyle(fontSize: 12, color: secondaryText.withOpacity(0.8)),
-                ),
+                Text("Último:", style: TextStyle(fontSize: 12, color: secondaryText.withOpacity(0.8))),
                 const SizedBox(width: 4),
-                Text(
-                  fechaUltimo,
-                  style: TextStyle(fontSize: 12, color: secondaryText.withOpacity(0.8)),
-                ),
+                Text(fechaUltimo, style: TextStyle(fontSize: 12, color: secondaryText.withOpacity(0.8))),
               ],
             ),
             const SizedBox(height: 4),
@@ -682,10 +773,7 @@ class SensorCard extends StatelessWidget {
               children: [
                 Icon(Icons.repeat_rounded, size: 16, color: secondaryText.withOpacity(0.6)),
                 const SizedBox(width: 8),
-                Text(
-                  "Intervalo Sugerido: $intervaloDias días",
-                  style: TextStyle(fontSize: 12, color: secondaryText.withOpacity(0.8)),
-                ),
+                Text("Intervalo Sugerido: $intervaloDias días", style: TextStyle(fontSize: 12, color: secondaryText.withOpacity(0.8))),
               ],
             ),
           ],
@@ -695,7 +783,9 @@ class SensorCard extends StatelessWidget {
   }
 }
 
-//  REGISTRO Y SUGERENCIA DE MANTENIMIENTO
+// ---------------------------------------------------
+//  REGISTRO Y SUGERENCIA DE MANTENIMIENTO 
+// ---------------------------------------------------
 class MaintenanceLogPage extends StatefulWidget {
   final String invernaderoId;
   final String sensorId;
@@ -725,14 +815,10 @@ class _MaintenanceLogPageState extends State<MaintenanceLogPage> {
     _loadMaintenanceData();
   }
 
-  // Carga los datos existentes de Firestore
   Future<void> _loadMaintenanceData() async {
     final docPath = "${widget.invernaderoId}_${widget.sensorId}";
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('mantenimientos')
-          .doc(docPath)
-          .get();
+      final doc = await FirebaseFirestore.instance.collection('mantenimientos').doc(docPath).get();
 
       if (doc.exists) {
         final data = doc.data()!;
@@ -741,29 +827,20 @@ class _MaintenanceLogPageState extends State<MaintenanceLogPage> {
         if (ultimo != null) {
           _lastMaintenanceDate = ultimo.toDate();
         } else {
-          // Si no hay último registro, usamos hoy como sugerencia
           _lastMaintenanceDate = DateTime.now();
         }
-
-        if (intervalo != null) {
-          _intervalDays = intervalo;
-        }
+        if (intervalo != null) _intervalDays = intervalo;
       } else {
         _lastMaintenanceDate = DateTime.now();
         _intervalDays = 30;
       }
     } catch (e) {
-      print("Error al cargar datos de mantenimiento: $e");
+      debugPrint("Error al cargar datos de mantenimiento: $e");
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // Muestra el selector de fecha
   Future<void> _selectDate(BuildContext context) async {
     final DateTime? picked = await showDatePicker(
       context: context,
@@ -784,18 +861,13 @@ class _MaintenanceLogPageState extends State<MaintenanceLogPage> {
       },
     );
     if (picked != null && picked != _lastMaintenanceDate) {
-      setState(() {
-        _lastMaintenanceDate = picked;
-      });
+      setState(() { _lastMaintenanceDate = picked; });
     }
   }
-  // Guarda los datos de mantenimiento en Firestore
+
   Future<void> _saveMaintenanceData() async {
     if (_isSaving) return;
-
-    setState(() {
-      _isSaving = true;
-    });
+    setState(() => _isSaving = true);
 
     final docPath = "${widget.invernaderoId}_${widget.sensorId}";
     final data = {
@@ -807,25 +879,17 @@ class _MaintenanceLogPageState extends State<MaintenanceLogPage> {
     };
 
     try {
-      await FirebaseFirestore.instance
-          .collection('mantenimientos')
-          .doc(docPath)
-          .set(data, SetOptions(merge: true));
-
-      _showSnackBar('Mantenimiento registrado y sugerencia actualizada.',
-          Icons.check_circle, primaryGreen);
+      await FirebaseFirestore.instance.collection('mantenimientos').doc(docPath).set(data, SetOptions(merge: true));
+      _showSnackBar('Mantenimiento registrado y sugerencia actualizada.', Icons.check_circle, primaryGreen);
       Navigator.pop(context);
     } catch (e) {
-      print("Error al guardar datos de mantenimiento: $e");
+      debugPrint("Error al guardar datos de mantenimiento: $e");
       _showSnackBar('Error al guardar: $e', Icons.error, Colors.redAccent);
     } finally {
-      if (mounted) {
-        setState(() {
-          _isSaving = false;
-        });
-      }
+      if (mounted) setState(() => _isSaving = false);
     }
   }
+
   void _showSnackBar(String message, IconData icon, Color color) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -839,214 +903,124 @@ class _MaintenanceLogPageState extends State<MaintenanceLogPage> {
           children: [
             Icon(icon, color: color),
             const SizedBox(width: 10),
-            Expanded(
-                child: Text(message, style: const TextStyle(fontSize: 15))),
+            Expanded(child: Text(message, style: const TextStyle(fontSize: 15))),
           ],
         ),
       ),
     );
   }
 
-  // Calcula la próxima fecha de mantenimiento sugerida
-  DateTime get _nextMaintenanceDate {
-    return _lastMaintenanceDate.add(Duration(days: _intervalDays));
-  }
-
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return Scaffold(
-        backgroundColor: backgroundColor,
-        appBar: AppBar(
-          title: Text("Mantenimiento: ${widget.sensorId.toUpperCase()}",
-              style: const TextStyle(color: Colors.white)),
-          backgroundColor: primaryGreen,
-          iconTheme: const IconThemeData(color: Colors.white),
-        ),
-        body: const Center(
-            child: CircularProgressIndicator(color: primaryGreen)),
-      );
-    }
-
-    // Formato para mostrar las fechas
-    final DateFormat formatter = DateFormat('EEEE, dd MMMM yyyy', 'es_ES');
-    final nextDateText = formatter.format(_nextMaintenanceDate);
+    final nextMaintenanceDate = _lastMaintenanceDate.add(Duration(days: _intervalDays));
 
     return Scaffold(
       backgroundColor: backgroundColor,
       appBar: AppBar(
-        title: Text("Mantenimiento: ${widget.sensorId.toUpperCase()}",
-            style: const TextStyle(color: Colors.white)),
+        title: Text(
+          "Mantenimiento: ${widget.sensorId.toUpperCase()}",
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+        ),
         backgroundColor: primaryGreen,
         iconTheme: const IconThemeData(color: Colors.white),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Card(
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-              elevation: 4,
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      "Último Mantenimiento Registrado",
-                      style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: secondaryText),
-                    ),
-                    const Divider(height: 20),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator(color: primaryGreen))
+          : ListView(
+              padding: const EdgeInsets.all(16.0),
+              children: [
+                // Sección de Próximo Mantenimiento
+                Card(
+                  elevation: 4,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          "Fecha:",
-                          style: TextStyle(fontSize: 16, color: secondaryText
-                              .withOpacity(0.8)),
+                        const Text("Próximo Mantenimiento Sugerido", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: primaryGreen)),
+                        const Divider(height: 20, color: alternateColor),
+                        Row(
+                          children: [
+                            const Icon(Icons.date_range_rounded, color: secondaryText),
+                            const SizedBox(width: 10),
+                            Text(
+                              DateFormat('EEEE, d MMMM yyyy', 'es_ES').format(nextMaintenanceDate),
+                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: secondaryText),
+                            ),
+                          ],
                         ),
-                        Text(
-                          DateFormat('dd/MM/yyyy').format(_lastMaintenanceDate),
-                          style: const TextStyle(fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: primaryGreen),
-                        ),
+                        const SizedBox(height: 16),
+                        Text("Intervalo sugerido (${_intervalDays} días):", style: TextStyle(color: secondaryText.withOpacity(0.8))),
+                        Wrap(
+                          spacing: 8.0,
+                          children: _intervalOptions.map((days) {
+                            return ChoiceChip(
+                              label: Text("$days días"),
+                              selected: _intervalDays == days,
+                              selectedColor: primaryGreen.withOpacity(0.2),
+                              onSelected: (selected) {
+                                if (selected) {
+                                  setState(() { _intervalDays = days; });
+                                }
+                              },
+                            );
+                          }).toList(),
+                        )
                       ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
-            const SizedBox(height: 25),
-            Text(
-              "Registro de Mantenimiento",
-              style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: primaryGreen),
-            ),
-            const Divider(color: alternateColor, thickness: 2, height: 30),
+                const SizedBox(height: 20),
 
-            // Selector de Fecha
-            const Text("1. ¿Cuándo se realizó el mantenimiento?",
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-            ListTile(
-              leading: Icon(Icons.event_note_rounded, color: primaryGreen),
-              title: Text(
-                DateFormat('dd MMMM yyyy').format(_lastMaintenanceDate),
-                style: const TextStyle(fontSize: 16),
-              ),
-              trailing: const Icon(Icons.edit, color: secondaryText),
-              onTap: () => _selectDate(context),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-                side: BorderSide(color: alternateColor, width: 1.5),
-              ),
-            ),
-            const SizedBox(height: 20),
-            // Selector de Intervalo Sugerido
-            const Text("2. Frecuencia de Mantenimiento Sugerida (Intervalo)",
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-            DropdownButtonFormField<int>(
-              decoration: InputDecoration(
-                prefixIcon: Icon(Icons.repeat_rounded, color: primaryGreen),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: alternateColor)),
-                filled: true,
-                fillColor: Colors.white,
-              ),
-              value: _intervalDays,
-              items: _intervalOptions.map((int value) {
-                return DropdownMenuItem<int>(
-                  value: value,
-                  child: Text('$value días'),
-                );
-              }).toList(),
-              onChanged: (int? newValue) {
-                if (newValue != null) {
-                  setState(() {
-                    _intervalDays = newValue;
-                  });
-                }
-              },
-            ),
-            const SizedBox(height: 25),
-            // Sugerencia Calculada
-            Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: primaryGreen.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: primaryGreen.withOpacity(0.5)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text("Próximo Mantenimiento SUGERIDO:",
-                        style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: primaryGreen)),
-                    const SizedBox(height: 8),
-                    Row(
+                // Sección de Último Mantenimiento
+                Card(
+                  elevation: 4,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(
-                            Icons.next_plan_rounded, color: primaryGreen),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            nextDateText,
-                            style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
-                                color: secondaryText),
-                          ),
+                        const Text("Último Mantenimiento Realizado", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: primaryGreen)),
+                        const Divider(height: 20, color: alternateColor),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              DateFormat('EEEE, d MMMM yyyy', 'es_ES').format(_lastMaintenanceDate),
+                              style: const TextStyle(fontSize: 16, color: secondaryText),
+                            ),
+                            TextButton.icon(
+                              onPressed: () => _selectDate(context),
+                              icon: const Icon(Icons.edit_calendar_rounded, color: primaryGreen),
+                              label: const Text("Cambiar Fecha"),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                    const SizedBox(height: 4),
-                    Text("Basado en un intervalo de $_intervalDays días.",
-                        style: TextStyle(fontSize: 12,
-                            color: secondaryText.withOpacity(0.7))),
-                  ],
-                )
-            ),
-            const SizedBox(height: 30),
-            // Botón de Guardar
-            SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: ElevatedButton.icon(
-                onPressed: _isSaving ? null : _saveMaintenanceData,
-                icon: _isSaving
-                    ? SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white)),
-                )
-                    : Icon(Icons.save_rounded, color: Colors.white),
-                label: Text(_isSaving ? "Guardando..." : "Guardar Registro",
-                    style: TextStyle(fontSize: 16, color: Colors.white)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: primaryGreen,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  elevation: 5,
+                  ),
                 ),
-              ),
+                const SizedBox(height: 30),
+
+                // Botón Guardar
+                ElevatedButton.icon(
+                  onPressed: _isSaving ? null : _saveMaintenanceData,
+                  icon: _isSaving ? 
+                    const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : 
+                    const Icon(Icons.save_rounded),
+                  label: Text(_isSaving ? 'Guardando...' : 'Guardar Configuración'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: primaryGreen,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
     );
   }
 }

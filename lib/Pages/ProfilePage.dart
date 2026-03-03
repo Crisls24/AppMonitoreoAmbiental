@@ -297,21 +297,32 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Widget _logoutButton() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-      child: ElevatedButton.icon(
-        onPressed: _confirmLogout,
-        icon: const Icon(Icons.logout_rounded),
-        label: const Text("Cerrar Sesión"),
-        style: ElevatedButton.styleFrom(
-          foregroundColor: Colors.white,
-          backgroundColor: Colors.red.shade800,
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14)),
+      // 1. Reducimos el padding horizontal aquí para que el botón use más ancho.
+      // Aumentamos el padding vertical para separarlo del contenido superior/inferior.
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 30),
+      child: SizedBox(
+        // 2. Usamos SizedBox con ancho infinito para forzar al botón a ocupar
+        // todo el ancho disponible dentro del Padding.
+        width: double.infinity,
+        child: ElevatedButton.icon(
+          onPressed: _confirmLogout,
+          icon: const Icon(Icons.logout_rounded, size: 22), // Un ícono ligeramente más grande
+          label: const Text(
+            "Cerrar Sesión",
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600), // Texto más legible
+          ),
+          style: ElevatedButton.styleFrom(
+            foregroundColor: Colors.white,
+            backgroundColor: Colors.red.shade800,
+            padding: const EdgeInsets.symmetric(vertical: 18),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)), // Ligeramente más redondeado
+            elevation: 8,
+          ),
         ),
       ),
     );
-  }
+}
 
   @override
   Widget build(BuildContext context) {

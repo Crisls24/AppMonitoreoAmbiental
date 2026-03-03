@@ -5,6 +5,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:invernadero/Pages/SideNav.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 
 const Color primaryGreen = Color(0xFF2E7D32);
@@ -19,6 +20,11 @@ class DatosHistoricos {
   final double tempCambio;
   final double humedadCambio;
   final double luzCambio;
+  final double horasEstresCalor;
+  final double horasEstresHumedad;
+  final double indiceEstresTermico;
+  final double indiceEstresHidrico;
+  final String estadoCultivo;
   final List<FlSpot> spotsTemp;
   final List<FlSpot> spotsHumedad;
   final List<FlSpot> spotsLuminosidad;
@@ -30,6 +36,11 @@ class DatosHistoricos {
     required this.tempCambio, required this.humedadCambio, required this.luzCambio,
     required this.spotsTemp, required this.spotsHumedad, required this.spotsLuminosidad,
     required this.alertas, required this.periodoEtiqueta,
+    required this.horasEstresCalor,
+    required this.horasEstresHumedad,
+    required this.indiceEstresTermico,
+    required this.indiceEstresHidrico,
+    required this.estadoCultivo,
   });
 }
 
@@ -50,158 +61,359 @@ class UmbralesCultivo {
   static const double humedadCriticaMin = 60.0;
 }
 
-// SERVICIO SIMULADO DE DATOS
 class HistoricalDataService {
-  final String appId; 
-  final Random _random = Random();
+  final String appId;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  HistoricalDataService({required this.appId}); 
-  // Función para generar puntos de datos con fluctuación y patrón diario simulado
-  List<FlSpot> _generateSpots(
-      String variable,
-      double baseValue,
-      double fluctuationFactor,
-      int length,
-      {int sampleRate = 3}
-      ) {
-    List<FlSpot> spots = [];
 
-    final isDaily = length == 24;
-    final maxSamples = isDaily ? length : length;
+  HistoricalDataService({required this.appId});
 
-    for (int i = 0; i < maxSamples; i++) {
-      if (isDaily && (i % sampleRate != 0 && i != maxSamples - 1)) continue;
-
-      double h = i.toDouble();
-      double randomNoise = (_random.nextDouble() - 0.5) * 0.75;
-      double value = baseValue;
-
-      if (isDaily) {
-        int hour = i;
-        double dayFactor = 0;
-
-        if (variable == 'Luminosidad') {
-          if (hour >= 6 && hour <= 18) {
-            dayFactor = sin((hour - 6) / 12 * pi);
-            value = 50 + baseValue * dayFactor + randomNoise * 20;
-          } else {
-            value = 1 + _random.nextDouble() * 10;
-          }
-        } else if (variable == 'Temperatura') {
-          double tempCycleFactor = cos(((hour + 10) % 24) / 24 * 2 * pi);
-          value = baseValue + tempCycleFactor * fluctuationFactor * 1.5 + randomNoise;
-        } else if (variable == 'Humedad') {
-          double humCycleFactor = sin(((hour + 10) % 24) / 24 * 2 * pi);
-          value = baseValue + humCycleFactor * fluctuationFactor * 0.8 + randomNoise;
-        }
-      } else {
-        double sinValue = sin((h / length) * 2 * pi);
-        if (variable == 'Luminosidad') {
-          value = baseValue + sinValue * fluctuationFactor + randomNoise * 10;
-        } else {
-          value = baseValue + sinValue * fluctuationFactor * 0.5 + randomNoise * 0.5;
-        }
-      }
-      value = double.parse(max(0, value).toStringAsFixed(1));
-      spots.add(FlSpot(h, value));
+  // Convertimos las fechas de Firebase a coordenadas X para FlChart
+  double _obtenerEjeX(DateTime fecha, String rango) {
+    if (rango == 'Día') {
+      // De 0 a 23.99 horas
+      return fecha.hour + (fecha.minute / 60.0);
+    } else if (rango == 'Semana') {
+      // De 0 a 6 (Lunes a Domingo)
+      return (fecha.weekday - 1).toDouble() + (fecha.hour / 24.0);
+    } else {
+      // Mes: de 1 a 31
+      return fecha.day.toDouble() + (fecha.hour / 24.0);
     }
-    return spots;
   }
 
-  // Genera datos de un periodo anterior para comparación
-  DatosHistoricos getComparisonData(String range) {
-    int length;
-    double tempBase;
-    double humBase;
-    double luzBase;
+  Future<DatosHistoricos> fetchHistoricalData(String range) async {
+    DateTime now = DateTime.now();
+    DateTime startDate;
 
-    switch(range) {
+    // Determinar la fecha de inicio según el rango seleccionado
+    switch (range) {
       case 'Día':
-        length = 24;
-        tempBase = 24.0;
-        humBase = 75.0;
-        luzBase = 650.0;
+        startDate = DateTime(now.year, now.month, now.day); 
         break;
       case 'Semana':
-        length = 7;
-        tempBase = 25.5;
-        humBase = 72.0;
-        luzBase = 300.0;
+        startDate = now.subtract(Duration(days: now.weekday - 1)); 
+        startDate = DateTime(startDate.year, startDate.month, startDate.day);
         break;
       case 'Mes':
-        length = 15;
-        tempBase = 24.5;
-        humBase = 75.0;
-        luzBase = 280.0;
+        startDate = DateTime(now.year, now.month, 1); 
         break;
       default:
-        length = 7;
-        tempBase = 25.5;
-        humBase = 72.0;
-        luzBase = 300.0;
+        startDate = now.subtract(const Duration(days: 7));
+    }
+
+    // Consulta a Firestore
+    // Usamos ruta: artifacts/default-app-id/public/data/historico_sensores
+    final QuerySnapshot snapshot = await _firestore
+    .collection('artifacts')
+    .doc(appId)
+    .collection('public')
+    .doc('data')
+    .collection('historico_sensores')
+    .where('fecha_registro', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate))
+    .orderBy('fecha_registro')
+    .get();
+
+    List<FlSpot> spotsTemp = [];
+    List<FlSpot> spotsHum = [];
+    List<FlSpot> spotsLuz = [];
+    List<AlertaEvento> alertas = [];
+
+    double sumTemp = 0, sumHum = 0, sumLuz = 0;
+    double maxTemp = 0;
+    int count = 0;
+
+    // Procesar los documentos reales
+    for (var doc in snapshot.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+
+      double horasEstresCalor = alertas
+      .where((a) => a.tipo == 'Calor')
+      .fold(0.0, (sum, a) => sum + a.duracionHoras);
+
+      double horasEstresHumedad = alertas
+      .where((a) => a.tipo == 'BajaHumedad')
+      .fold(0.0, (sum, a) => sum + a.duracionHoras);
+
+      double horasTotalesPeriodo = now.difference(startDate).inHours.toDouble();
+
+      if (horasTotalesPeriodo == 0) {
+        horasTotalesPeriodo = 1; 
+      }
+
+      double indiceEstresTermico = (horasEstresCalor / horasTotalesPeriodo) * 100;
+      double indiceEstresHidrico = (horasEstresHumedad / horasTotalesPeriodo) * 100;
+
+      String estadoCultivo;
+      double indiceTotal = indiceEstresTermico + indiceEstresHidrico;
+
+      if (indiceTotal > 20) {
+        estadoCultivo = "Crítico";
+      } else if (indiceTotal > 5) {
+        estadoCultivo = "Riesgo Moderado";
+      } else {
+        estadoCultivo = "Estable";
+      }
+      
+      // Extraer valores (manejando posibles nulos)
+      double temp = (data['temperatura'] ?? 0).toDouble();
+      double hum = (data['humedad'] ?? 0).toDouble();
+      double luz = (data['luminosidad'] ?? 0).toDouble();
+      
+      // Parsear fecha
+      Timestamp ts = data['fecha_registro'];
+      DateTime fecha = ts.toDate();
+      double x = _obtenerEjeX(fecha, range);
+
+      // Agregar a las gráficas
+      spotsTemp.add(FlSpot(x, temp));
+      spotsHum.add(FlSpot(x, hum));
+      spotsLuz.add(FlSpot(x, luz));
+
+      // Sumatorias para promedios
+      sumTemp += temp;
+      sumHum += hum;
+      sumLuz += luz;
+      if (temp > maxTemp) maxTemp = temp;
+      count++;
+
+      // Detectar anomalías reales guardadas por el ESP32
+      bool esAnomalia = data['es_anomalia'] ?? false;
+      if (esAnomalia) {
+        String tipo = temp >= UmbralesCultivo.tempCriticaMax ? 'Calor' : 'BajaHumedad';
+        double valorPico = tipo == 'Calor' ? temp : hum;
+        
+        alertas.add(AlertaEvento(
+          tipo: tipo,
+          horaInicio: fecha,
+          valorPico: valorPico,
+          duracionHoras: 0.5, 
+        ));
+      }
+    }
+
+    // Si no hay datos, devolver todo en 0 para que no falle la app
+    if (count == 0) {
+      return DatosHistoricos(
+        tempPromedio: 0, tempMaxima: 0, humedadPromedio: 0, luminosidadPromedio: 0,
+        tempCambio: 0, humedadCambio: 0, luzCambio: 0, periodoEtiqueta: range,
+        spotsTemp: [], spotsHumedad: [], spotsLuminosidad: [], alertas: [], horasEstresCalor: 0,
+        horasEstresHumedad: 0, indiceEstresTermico: 0, indiceEstresHidrico: 0, estadoCultivo: "Sin datos",
+      );
     }
 
     return DatosHistoricos(
-      tempPromedio: tempBase + 1.0, tempMaxima: tempBase + 5.0,
-      humedadPromedio: humBase - 2.0, luminosidadPromedio: luzBase + 10.0,
-      tempCambio: 0.0, humedadCambio: 0.0, luzCambio: 0.0, periodoEtiqueta: 'Base',
-      spotsTemp: _generateSpots('Temperatura', tempBase, 3.0, length),
-      spotsHumedad: _generateSpots('Humedad', humBase, 5.0, length),
-      spotsLuminosidad: _generateSpots('Luminosidad', luzBase, 50.0, length),
-      alertas: const [],
+      tempPromedio: sumTemp / count,
+      tempMaxima: maxTemp,
+      humedadPromedio: sumHum / count,
+      luminosidadPromedio: sumLuz / count,
+      tempCambio: 0.0, 
+      humedadCambio: 0.0, 
+      luzCambio: 0.0, 
+      periodoEtiqueta: range,
+      spotsTemp: spotsTemp,
+      spotsHumedad: spotsHum,
+      spotsLuminosidad: spotsLuz,
+      alertas: alertas,
+      horasEstresCalor: 0,
+      horasEstresHumedad: 0,
+      indiceEstresTermico: 0,
+      indiceEstresHidrico: 0,
+      estadoCultivo: "Sin datos",
+    );
+  }
+  DatosHistoricos getComparisonData(String range) {
+    return DatosHistoricos(
+      tempPromedio: 0, tempMaxima: 0, humedadPromedio: 0, luminosidadPromedio: 0,
+      tempCambio: 0, humedadCambio: 0, luzCambio: 0, periodoEtiqueta: 'Base',
+      spotsTemp: [], spotsHumedad: [], spotsLuminosidad: [], alertas: const [],horasEstresCalor: 0,
+      horasEstresHumedad: 0, indiceEstresTermico: 0, indiceEstresHidrico: 0, estadoCultivo: "Sin datos",
+    );
+  }
+}
+//Widget Semaforo Arriba de las kpis para mostrar el estado general del cultivo
+class _CultivoStatusCard extends StatelessWidget {
+  final String estado;
+  final double indiceTermico;
+  final double indiceHidrico;
+
+  const _CultivoStatusCard({
+    required this.estado,
+    required this.indiceTermico,
+    required this.indiceHidrico,
+  });
+
+  Color _getColor() {
+    switch (estado) {
+      case 'Critico':
+        return Colors.red;
+      case 'Riesgo':
+        return Colors.orange;
+      default:
+        return Colors.green;
+    }
+  }
+
+  IconData _getIcon() {
+    switch (estado) {
+      case 'Critico':
+        return Icons.warning_rounded;
+      case 'Riesgo':
+        return Icons.error_outline;
+      default:
+        return Icons.check_circle_outline;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _getColor();
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            color.withOpacity(0.85),
+            color.withOpacity(0.65),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: color.withOpacity(0.3),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          )
+        ],
+      ),
+      child: Row(
+        children: [
+          Icon(
+            _getIcon(),
+            color: Colors.white,
+            size: 42,
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Estado General del Cultivo",
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.9),
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  estado.toUpperCase(),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  "Índice térmico: ${indiceTermico.toStringAsFixed(1)}%  |  Índice hídrico: ${indiceHidrico.toStringAsFixed(1)}%",
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          )
+        ],
+      ),
+    );
+  }
+}
+//Widget para mostrar las horas de estrés por calor e hídrico debajo del semáforo
+class _EstresCard extends StatelessWidget {
+  final double horasCalor;
+  final double horasHumedad;
+
+  const _EstresCard({
+    required this.horasCalor,
+    required this.horasHumedad,
+  });
+
+  Color _getColor(double horas) {
+    if (horas >= 6) return Colors.red;
+    if (horas >= 3) return Colors.orange;
+    return Colors.green;
+  }
+
+  String _getNivel(double horas) {
+    if (horas >= 6) return "Crítico";
+    if (horas >= 3) return "Moderado";
+    return "Controlado";
+  }
+
+  Widget _buildIndicador(String titulo, double horas) {
+    final color = _getColor(horas);
+
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withOpacity(0.4)),
+        ),
+        child: Column(
+          children: [
+            Text(
+              titulo,
+              style: const TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              "${horas.toStringAsFixed(1)} h",
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _getNivel(horas),
+              style: TextStyle(
+                color: color,
+                fontSize: 13,
+              ),
+            )
+          ],
+        ),
+      ),
     );
   }
 
-  // Genera datos históricos para el periodo seleccionado
-  Future<DatosHistoricos> fetchHistoricalData(String range) async {
-    
-    await Future.delayed(const Duration(milliseconds: 700));
-
-    final now = DateTime.now();
-
-    final Map<String, DatosHistoricos> mockData = {
-      'Día': DatosHistoricos(
-        tempPromedio: 26.5, tempMaxima: 30.5, humedadPromedio: 70.0, luminosidadPromedio: 400.0,
-        tempCambio: -1.5, humedadCambio: 3.0, luzCambio: 10.0,
-        periodoEtiqueta: 'Hoy',
-        spotsTemp: _generateSpots('Temperatura', 26.0, 4.0, 24),
-        spotsHumedad: _generateSpots('Humedad', 70.0, 6.0, 24),
-        spotsLuminosidad: _generateSpots('Luminosidad', 700.0, 200.0, 24),
-        alertas: [
-          AlertaEvento(tipo: 'Calor', horaInicio: now.subtract(const Duration(hours: 4)), valorPico: 30.5, duracionHoras: 1.0),
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      child: Row(
+        children: [
+          _buildIndicador("Estrés Térmico", horasCalor),
+          const SizedBox(width: 12),
+          _buildIndicador("Estrés Hídrico", horasHumedad),
         ],
       ),
-      'Semana': DatosHistoricos(
-        tempPromedio: 27.8, tempMaxima: 31.2, humedadPromedio: 68.0, luminosidadPromedio: 380.0,
-        tempCambio: 2.0, humedadCambio: -1.5, luzCambio: 5.0,
-        periodoEtiqueta: 'Esta Semana',
-        spotsTemp: _generateSpots('Temperatura', 27.0, 3.0, 7),
-        spotsHumedad: _generateSpots('Humedad', 70.0, 4.0, 7),
-        spotsLuminosidad: _generateSpots('Luminosidad', 380.0, 50.0, 7),
-        alertas: [
-          AlertaEvento(tipo: 'Calor', horaInicio: DateTime(2025, 10, 8, 14, 30), valorPico: 31.8, duracionHoras: 2.5),
-          AlertaEvento(tipo: 'BajaHumedad', horaInicio: DateTime(2025, 10, 9, 10, 0), valorPico: 58.5, duracionHoras: 3.0),
-        ],
-      ),
-      'Mes': DatosHistoricos(
-        tempPromedio: 26.0, tempMaxima: 29.0, humedadPromedio: 72.0, luminosidadPromedio: 330.0,
-        tempCambio: -0.5, humedadCambio: 0.5, luzCambio: -2.0,
-        periodoEtiqueta: 'Este Mes',
-        spotsTemp: _generateSpots('Temperatura', 26.0, 1.5, 15),
-        spotsHumedad: _generateSpots('Humedad', 72.0, 3.0, 15),
-        spotsLuminosidad: _generateSpots('Luminosidad', 330.0, 50.0, 15),
-        alertas: [
-          AlertaEvento(tipo: 'BajaHumedad', horaInicio: DateTime(2025, 9, 15, 8, 0), valorPico: 59.1, duracionHoras: 1.5),
-        ],
-      ),
-    };
-
-    return mockData[range] ?? mockData['Semana']!;
+    );
   }
 }
 
 // WIDGET MODULAR: Gráfica de Línea Histórica
-
 class _HistoricalLineChart extends StatelessWidget {
   final DatosHistoricos datosActual;
   final DatosHistoricos datosAnterior;
@@ -211,6 +423,7 @@ class _HistoricalLineChart extends StatelessWidget {
   final Color primaryColor;
 
   const _HistoricalLineChart({
+    super.key,
     required this.datosActual,
     required this.datosAnterior,
     required this.variableSeleccionada,
@@ -267,7 +480,6 @@ class _HistoricalLineChart extends StatelessWidget {
     return (maxVal + 5).ceilToDouble();
   }
 
-
   @override
   Widget build(BuildContext context) {
     List<FlSpot> spotsActual;
@@ -318,18 +530,18 @@ class _HistoricalLineChart extends StatelessWidget {
     ];
 
     double maxX = 0;
+    double xInterval = 4; 
+    
     if (rango == 'Día') {
       maxX = 23;
+      xInterval = 4;
     } else if (rango == 'Semana') {
       maxX = 6;
+      xInterval = 1;
     } else if (rango == 'Mes') {
       maxX = 14;
+      xInterval = 4;
     }
-
-    final maxSpotX = spotsActual.isNotEmpty
-        ? spotsActual.map((spot) => spot.x).reduce((a, b) => max(a, b)).toDouble()
-        : 0.0;
-    if (maxSpotX > maxX) maxX = maxSpotX;
 
     final minY = _calculateMinY(spotsActual);
     final maxY = _calculateMaxY(spotsActual);
@@ -337,16 +549,12 @@ class _HistoricalLineChart extends StatelessWidget {
     double yInterval = 5.0;
     if (variableSeleccionada == 'Luminosidad') {
       yInterval = (maxY / 4).ceilToDouble();
-      if (yInterval > 100) yInterval = 100;
-      if (yInterval > 200) yInterval = 200;
+      if (yInterval < 100) yInterval = 100; 
     } else {
       yInterval = (maxY - minY) / 4;
-      if (yInterval > 5) yInterval = 5;
-      if (yInterval < 2) yInterval = 2;
+      if (yInterval < 2) yInterval = 2; 
     }
-
     yInterval = yInterval.roundToDouble();
-
 
     final LineChartData chartData = LineChartData(
       minX: 0,
@@ -370,7 +578,7 @@ class _HistoricalLineChart extends StatelessWidget {
           sideTitles: SideTitles(
             showTitles: true,
             reservedSize: 30,
-            interval: rango == 'Día' ? 4 : (rango == 'Semana' ? 1 : 4),
+            interval: xInterval, // <-- Usamos la nueva variable segura
             getTitlesWidget: (value, meta) {
               String text = '';
               final int v = value.toInt();
@@ -437,7 +645,7 @@ class _HistoricalLineChart extends StatelessWidget {
               onSelectionChanged: (v) => onSelectVariable(v.first),
               style: SegmentedButton.styleFrom(
                 selectedBackgroundColor: Colors.grey.shade200,
-                selectedForegroundColor: primaryGreen,
+                selectedForegroundColor: primaryColor, 
               ),
             ),
             const SizedBox(height: 15),
@@ -448,7 +656,7 @@ class _HistoricalLineChart extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(top: 8.0),
               child: Text(
-                '— Periodo Actual  ••• Periodo Anterior',
+                '— Periodo Actual   ••• Periodo Anterior',
                 style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                 textAlign: TextAlign.center,
               ),
@@ -459,7 +667,6 @@ class _HistoricalLineChart extends StatelessWidget {
     );
   }
 }
-
 
 // PÁGINA PRINCIPAL
 
@@ -571,7 +778,6 @@ class _ReportesHistoricosPageState extends State<ReportesHistoricosPage> {
         IconButton(
           icon: const Icon(Icons.notifications_active, color: Colors.white),
           onPressed: () {
-            // Llama a la función que muestra el BottomSheet de alertas
             _mostrarDetalleAlertasGlobales(context, alertasGlobales);
           },
         ),
@@ -615,7 +821,6 @@ class _ReportesHistoricosPageState extends State<ReportesHistoricosPage> {
         backgroundColor: primaryGreen,
         elevation: 0,
         actions: [
-          // FUTUREBUILDER PARA EL ICONO DE NOTIFICACIONES
           FutureBuilder<DatosHistoricos>(
             future: _futureDataMesCompleto,
             builder: (context, snapshot) {
@@ -648,6 +853,15 @@ class _ReportesHistoricosPageState extends State<ReportesHistoricosPage> {
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
+                _CultivoStatusCard(
+                  estado: datosDePrueba.estadoCultivo,
+                  indiceTermico: datosDePrueba.indiceEstresTermico,
+                  indiceHidrico: datosDePrueba.indiceEstresHidrico,
+                ),
+                _EstresCard(
+                  horasCalor: datosDePrueba.horasEstresCalor,
+                  horasHumedad: datosDePrueba.horasEstresHumedad,
+                ),
                 _buildResumenKPIs(datosDePrueba, secondaryColor),
                 const SizedBox(height: 20),
                 _buildFiltros(),
@@ -1097,4 +1311,5 @@ class _KpiCard extends StatelessWidget {
     );
   }
 }
+
 
