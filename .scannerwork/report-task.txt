@@ -1,6 +1,0 @@
-projectKey=BioSensor
-serverUrl=http://localhost:9000
-serverVersion=26.1.0.118079
-dashboardUrl=http://localhost:9000/dashboard?id=BioSensor
-ceTaskId=b5967ed8-5411-4ed4-9c8b-129915859589
-ceTaskUrl=http://localhost:9000/api/ce/task?id=b5967ed8-5411-4ed4-9c8b-129915859589
