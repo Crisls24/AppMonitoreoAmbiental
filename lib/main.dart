@@ -297,6 +297,7 @@ Future<void> cerrarSesion(BuildContext context, String appId) async {
 
     if (context.mounted) {
       // Reemplaza toda la pila de navegación y vuelve al decider
+      // CORRECCIÓN CLAVE: Pasamos el appId a InicioSesion
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => InicioSesion(appId: appId)),
             (route) => false,
