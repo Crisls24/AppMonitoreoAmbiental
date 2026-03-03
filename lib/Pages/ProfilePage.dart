@@ -3,80 +3,90 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:invernadero/Pages/SideNav.dart';
-import 'package:invernadero/Pages/login.dart';
+import 'package:invernadero/Pages/InicioSesionPage.dart';
+import 'dart:developer';
 
 const Color primaryGreen = Color(0xFF2E7D32);
 const Color accentGreen = Color(0xFF81C784);
 const Color lightBackground = Color(0xFFF5FBEF);
 
 class ProfilePage extends StatefulWidget {
-  const ProfilePage({super.key});
+  final String appId;
+
+  const ProfilePage({super.key, required this.appId});
 
   @override
   State<ProfilePage> createState() => _ProfilePageState();
 }
 
 class _ProfilePageState extends State<ProfilePage> {
-  String _userName = 'Cargando...';
-  String _userEmail = 'cargando@ejemplo.com';
-  String _userRole = 'Invitado';
-  String _numInvernaderos = '0';
-  String _profileImageUrl = 'https://placehold.co/120x120/E0E0E0/616161?text=U';
-  String _userUsername = 'Cargando...';
+  String _profileImageUrl =
+      'https://placehold.co/120x120/E0E0E0/616161?text=U';
+
+  User? _currentUser;
+
+  late final CollectionReference<Map<String, dynamic>> usuariosRef;
+  late final CollectionReference<Map<String, dynamic>> invernaderosRef;
+
+  late Stream<DocumentSnapshot<Map<String, dynamic>>> _userStream;
 
   @override
   void initState() {
     super.initState();
-    _loadUserData();
-  }
+    _currentUser = FirebaseAuth.instance.currentUser;
+    // RUTAS OFICIALES FIRESTORE (CollectionReference real)
+    usuariosRef = FirebaseFirestore.instance
+        .collection('artifacts')
+        .doc(widget.appId)
+        .collection('public')
+        .doc('data')
+        .collection('usuarios');
 
-  Future<void> _loadUserData() async {
-    User? currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser != null) {
-      setState(() {
-        _userEmail = currentUser.email ?? 'No disponible';
-        _profileImageUrl = currentUser.photoURL ?? _profileImageUrl;
+    invernaderosRef = FirebaseFirestore.instance
+        .collection('artifacts')
+        .doc(widget.appId)
+        .collection('public')
+        .doc('data')
+        .collection('invernaderos');
+
+    if (_currentUser == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _navigateToLogin();
       });
-
-      try {
-        // Obtener datos del usuario
-        final userDoc = await FirebaseFirestore.instance
-            .collection('usuarios')
-            .doc(currentUser.uid)
-            .get();
-
-        final data = userDoc.data() ?? {};
-
-        // Buscar todos los invernaderos cuyo ownerId coincide con el usuario actual
-        final invernaderosQuery = await FirebaseFirestore.instance
-            .collection('invernaderos')
-            .where('ownerId', isEqualTo: currentUser.uid)
-            .get();
-        int cantidadInvernaderos = invernaderosQuery.docs.length;
-
-        setState(() {
-          _userName = data['nombre'] ?? 'Usuario BioSensor';
-          _userUsername = data['username'] ?? _userName;
-          _userRole = data['rol'] ?? 'Administrador';
-          _numInvernaderos = cantidadInvernaderos.toString();
-        });
-      } catch (e) {
-        debugPrint('Error cargando datos: $e');
-      }
     } else {
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const InicioSesion()),
-        );
-      }
+      _profileImageUrl = _currentUser!.photoURL ?? _profileImageUrl;
+
+      _userStream = usuariosRef
+          .doc(_currentUser!.uid)
+          .snapshots();
     }
   }
 
+  // REDIRECCIÓN A LOGIN
+  void _navigateToLogin() {
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => InicioSesion(appId: widget.appId)),
+          (route) => false,
+    );
+  }
+
+  // Conteo de invernaderos del usuario
+  Stream<int> _greenhouseCountStream() {
+    if (_currentUser == null) return const Stream.empty();
+
+    return invernaderosRef
+        .where('ownerId', isEqualTo: _currentUser!.uid)
+        .snapshots()
+        .map((s) => s.docs.length);
+  }
+
+  // LOGOUT
   Future<void> _logout() async {
     try {
       await FirebaseAuth.instance.signOut();
       await GoogleSignIn().signOut();
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -85,13 +95,12 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
         );
         await Future.delayed(const Duration(milliseconds: 600));
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (_) => const InicioSesion()),
-              (route) => false,
-        );
+
+        _navigateToLogin();
       }
     } catch (e) {
+      log('Error al cerrar sesión: $e');
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error al cerrar sesión: $e'),
@@ -101,6 +110,7 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  // DIALOGO CONFIRMAR CIERRE DE SESIÓN
   Future<void> _confirmLogout() async {
     await showDialog(
       context: context,
@@ -117,15 +127,12 @@ class _ProfilePageState extends State<ProfilePage> {
               const Text(
                 '¿Deseas cerrar sesión?',
                 style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87),
+                    fontSize: 20, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 10),
               const Text(
                 'Tu sesión actual se cerrará y volverás al inicio de sesión.',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 15, color: Colors.black54),
               ),
               const SizedBox(height: 25),
               Row(
@@ -133,7 +140,6 @@ class _ProfilePageState extends State<ProfilePage> {
                 children: [
                   TextButton(
                     onPressed: () => Navigator.pop(context),
-                    style: TextButton.styleFrom(foregroundColor: Colors.black54),
                     child: const Text('Cancelar'),
                   ),
                   ElevatedButton(
@@ -142,12 +148,8 @@ class _ProfilePageState extends State<ProfilePage> {
                       _logout();
                     },
                     style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 18, vertical: 12),
                       backgroundColor: Colors.red.shade800,
                       foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
                     ),
                     child: const Text('Cerrar sesión'),
                   ),
@@ -160,7 +162,25 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  Widget _buildHeader() {
+  // UI PRINCIPAL
+  Widget _buildProfileBody(Map<String, dynamic> userData) {
+    final userName = userData['nombre'] ?? 'Usuario BioSensor';
+    final userUsername = userData['username'] ?? userName;
+    final userRole = userData['rol'] ?? 'Invitado';
+    final userEmail = _currentUser?.email ?? 'No disponible';
+
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          _buildHeader(userName, userEmail, userRole),
+          _infoContainer(userName, userUsername, userRole, userEmail),
+          _logoutButton(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeader(String name, String email, String role) {
     return Container(
       width: double.infinity,
       height: 270,
@@ -170,10 +190,8 @@ class _ProfilePageState extends State<ProfilePage> {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(40),
-          bottomRight: Radius.circular(40),
-        ),
+        borderRadius:
+        BorderRadius.vertical(bottom: Radius.circular(40)),
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -182,44 +200,38 @@ class _ProfilePageState extends State<ProfilePage> {
             radius: 48,
             backgroundColor: Colors.white,
             backgroundImage: NetworkImage(_profileImageUrl),
-            onBackgroundImageError: (_, __) => setState(() {
-              _profileImageUrl = 'assets/user_placeholder.png';
-            }),
-            child: _profileImageUrl.contains('placeholder')
-                ? const Icon(Icons.person, size: 55, color: Colors.black45)
+            child: _profileImageUrl.contains("placehold")
+                ? const Icon(Icons.person, size: 55)
                 : null,
           ),
           const SizedBox(height: 10),
-          Text(
-            _userName,
-            style: const TextStyle(
-                color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
-          ),
+          Text(name,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold)),
           const SizedBox(height: 5),
-          Text(
-            _userEmail,
-            style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 14),
-          ),
+          Text(email,
+              style: TextStyle(
+                  color: Colors.white.withOpacity(0.9),
+                  fontSize: 14)),
           const SizedBox(height: 8),
           Container(
-            padding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white24),
-            ),
-            child: Text(
-              _userRole,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
-            ),
+                color: Colors.white.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(20)),
+            child: Text(role,
+                style: const TextStyle(color: Colors.white, fontSize: 13)),
           ),
         ],
       ),
     );
   }
 
-  Widget _infoContainer() {
+  // Tarjeta de Información
+  Widget _infoContainer(
+      String name, String username, String role, String email) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
       padding: const EdgeInsets.all(22),
@@ -236,16 +248,26 @@ class _ProfilePageState extends State<ProfilePage> {
       ),
       child: Column(
         children: [
-          _infoRow(Icons.person_outline, "Nombre Completo", _userName),
-          const Divider(height: 25, color: Colors.black12),
-          _infoRow(Icons.badge_outlined, "Alias / Usuario", _userUsername),
-          const Divider(height: 25, color: Colors.black12),
-          _infoRow(Icons.work_outline, "Rol", _userRole),
-          const Divider(height: 25, color: Colors.black12),
-          _infoRow(Icons.eco_outlined, "N° de Invernaderos Registrados",
-              _numInvernaderos),
-          const Divider(height: 25, color: Colors.black12),
-          _infoRow(Icons.email_outlined, "Correo Electrónico", _userEmail),
+          _infoRow(Icons.person_outline, "Nombre Completo", name),
+          const Divider(),
+          _infoRow(Icons.badge_outlined, "Alias / Usuario", username),
+          const Divider(),
+          _infoRow(Icons.work_outline, "Rol", role),
+          const Divider(),
+          StreamBuilder<int>(
+            stream: _greenhouseCountStream(),
+            builder: (context, snap) {
+              final count =
+                  snap.data?.toString() ??
+                      (snap.connectionState == ConnectionState.waiting
+                          ? '...'
+                          : '0');
+              return _infoRow(Icons.eco_outlined,
+                  "N° de Invernaderos Registrados", count);
+            },
+          ),
+          const Divider(),
+          _infoRow(Icons.email_outlined, "Correo Electrónico", email),
         ],
       ),
     );
@@ -257,73 +279,89 @@ class _ProfilePageState extends State<ProfilePage> {
         Icon(icon, color: primaryGreen, size: 22),
         const SizedBox(width: 15),
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label,
-                  style: const TextStyle(
-                      color: Colors.black54,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500)),
-              const SizedBox(height: 2),
-              Text(value,
-                  style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87)),
-            ],
-          ),
-        ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label,
+                    style: const TextStyle(
+                        color: Colors.black54, fontSize: 13)),
+                Text(value,
+                    style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold)),
+              ],
+            )),
       ],
     );
   }
 
   Widget _logoutButton() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-      child: ElevatedButton.icon(
-        onPressed: _confirmLogout,
-        icon: const Icon(Icons.logout_rounded, color: Colors.white),
-        label: const Text(
-          "Cerrar Sesión",
-          style: TextStyle(
-              fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
-        ),
-        style: ElevatedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          minimumSize: const Size(double.infinity, 50),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          backgroundColor: Colors.red.shade800,
-          elevation: 5,
+      // 1. Reducimos el padding horizontal aquí para que el botón use más ancho.
+      // Aumentamos el padding vertical para separarlo del contenido superior/inferior.
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 30),
+      child: SizedBox(
+        // 2. Usamos SizedBox con ancho infinito para forzar al botón a ocupar
+        // todo el ancho disponible dentro del Padding.
+        width: double.infinity,
+        child: ElevatedButton.icon(
+          onPressed: _confirmLogout,
+          icon: const Icon(Icons.logout_rounded, size: 22), // Un ícono ligeramente más grande
+          label: const Text(
+            "Cerrar Sesión",
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600), // Texto más legible
+          ),
+          style: ElevatedButton.styleFrom(
+            foregroundColor: Colors.white,
+            backgroundColor: Colors.red.shade800,
+            padding: const EdgeInsets.symmetric(vertical: 18),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)), // Ligeramente más redondeado
+            elevation: 8,
+          ),
         ),
       ),
     );
-  }
+}
 
   @override
   Widget build(BuildContext context) {
+    if (_currentUser == null) {
+      return const Scaffold(
+          body: Center(child: CircularProgressIndicator()));
+    }
+
     return Scaffold(
       backgroundColor: lightBackground,
-      drawer: const Drawer(child: SideNav()),
+      drawer:
+      Drawer(child: SideNav(currentRoute: 'Perfil', appId: widget.appId)),
       appBar: AppBar(
         backgroundColor: primaryGreen,
         elevation: 0,
-        centerTitle: true,
-        iconTheme: const IconThemeData(color: Colors.white),
-        title: const Text(
-          "Perfil del Usuario",
-          style: TextStyle(
-              color: Colors.white, fontWeight: FontWeight.bold, fontSize: 19),
-        ),
+        title: const Text("Perfil del Usuario",
+            style: TextStyle(color: Colors.white)),
       ),
-      body: SingleChildScrollView(
-        child: Column(
-          children: [
-            _buildHeader(),
-            _infoContainer(),
-            _logoutButton(),
-          ],
-        ),
+      body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+        stream: _userStream,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Center(
+              child: Text("Error al cargar perfil: ${snapshot.error}"),
+            );
+          }
+
+          if (!snapshot.hasData || !snapshot.data!.exists) {
+            return const Center(
+              child: Text(
+                "Error: Datos de usuario no encontrados.",
+                textAlign: TextAlign.center,
+              ),
+            );
+          }
+
+          final userData = snapshot.data!.data()!;
+          return _buildProfileBody(userData);
+        },
       ),
     );
   }
